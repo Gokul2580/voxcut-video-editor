@@ -14,12 +14,64 @@ import cv2
 import os
 import shutil
 
-# OpenAI API for speech detection
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
+# OpenAI API for Whisper transcription
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
+
+# AssemblyAI for advanced transcription
+try:
+    import assemblyai as aai
+    ASSEMBLYAI_AVAILABLE = True
+except ImportError:
+    ASSEMBLYAI_AVAILABLE = False
+
+# Google Gemini for AI features
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
+# ElevenLabs for text-to-speech
+try:
+    from elevenlabs import ElevenLabs
+    ELEVENLABS_AVAILABLE = True
+except ImportError:
+    ELEVENLABS_AVAILABLE = False
+
+# Initialize API clients
+def get_openai_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key and OPENAI_AVAILABLE:
+        return OpenAI(api_key=api_key)
+    return None
+
+def get_assemblyai_client():
+    api_key = os.getenv("ASSEMBLYAI_API_KEY")
+    if api_key and ASSEMBLYAI_AVAILABLE:
+        aai.settings.api_key = api_key
+        return aai.Transcriber()
+    return None
+
+def get_gemini_client():
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key and GEMINI_AVAILABLE:
+        genai.configure(api_key=api_key)
+        return genai.GenerativeModel('gemini-pro')
+    return None
+
+def get_elevenlabs_client():
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if api_key and ELEVENLABS_AVAILABLE:
+        return ElevenLabs(api_key=api_key)
+    return None
 
 
 # ============================================
@@ -358,7 +410,7 @@ async def denoise_audio_async(job_id: str, video_path: str, manager=None) -> boo
 
 
 async def generate_captions_async(job_id: str, video_path: str, manager=None) -> bool:
-    """Generate captions using OpenAI Whisper API"""
+    """Generate captions using AssemblyAI (primary) or OpenAI Whisper (fallback)"""
     try:
         job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
         await broadcast_progress(manager, job_id, 10, "Extracting audio...")
@@ -373,16 +425,62 @@ async def generate_captions_async(job_id: str, video_path: str, manager=None) ->
         run_ffmpeg(cmd)
 
         job_manager.update_progress(job_id, 30, JobStatus.PROCESSING)
-        await broadcast_progress(manager, job_id, 30, "Transcribing speech...")
+        await broadcast_progress(manager, job_id, 30, "Transcribing with AI...")
 
         captions = []
-
-        if OPENAI_AVAILABLE:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if api_key:
+        
+        # Try AssemblyAI first (better accuracy)
+        transcriber = get_assemblyai_client()
+        if transcriber:
+            try:
+                await broadcast_progress(manager, job_id, 40, "Using AssemblyAI transcription...")
+                
+                config = aai.TranscriptionConfig(
+                    speaker_labels=True,
+                    auto_highlights=True,
+                    punctuate=True,
+                    format_text=True
+                )
+                
+                transcript = transcriber.transcribe(str(audio_path), config=config)
+                
+                if transcript.status == aai.TranscriptStatus.completed:
+                    if transcript.words:
+                        # Group words into sentences
+                        current_sentence = {"id": 1, "start": 0, "end": 0, "text": "", "speaker": None}
+                        sentence_words = []
+                        
+                        for word in transcript.words:
+                            sentence_words.append(word.text)
+                            if not current_sentence["start"]:
+                                current_sentence["start"] = word.start / 1000  # Convert ms to seconds
+                            current_sentence["end"] = word.end / 1000
+                            current_sentence["speaker"] = getattr(word, 'speaker', None)
+                            
+                            # End sentence on punctuation
+                            if word.text.endswith(('.', '!', '?', ',')):
+                                current_sentence["text"] = ' '.join(sentence_words)
+                                if len(current_sentence["text"].strip()) > 0:
+                                    captions.append(current_sentence.copy())
+                                current_sentence = {"id": len(captions) + 1, "start": 0, "end": 0, "text": "", "speaker": None}
+                                sentence_words = []
+                        
+                        # Add remaining words
+                        if sentence_words:
+                            current_sentence["text"] = ' '.join(sentence_words)
+                            if len(current_sentence["text"].strip()) > 0:
+                                captions.append(current_sentence)
+                                
+            except Exception as e:
+                print(f"AssemblyAI failed: {e}")
+        
+        # Fallback to OpenAI Whisper
+        if not captions:
+            client = get_openai_client()
+            if client:
                 try:
-                    client = OpenAI(api_key=api_key)
-
+                    await broadcast_progress(manager, job_id, 50, "Using OpenAI Whisper...")
+                    
                     with open(audio_path, "rb") as audio_file:
                         result = client.audio.transcriptions.create(
                             model="whisper-1",
@@ -1161,3 +1259,258 @@ async def detect_speech_whisper(audio_path: str) -> List[Tuple[float, float]]:
         except Exception as e:
             print(f"Whisper failed: {e}")
     return []
+
+
+# ============================================
+# Text-to-Speech with ElevenLabs
+# ============================================
+
+async def generate_voiceover_async(job_id: str, text: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM", manager=None) -> bool:
+    """Generate voiceover audio using ElevenLabs"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        await broadcast_progress(manager, job_id, 10, "Generating voiceover...")
+        
+        client = get_elevenlabs_client()
+        if not client:
+            job_manager.fail_job(job_id, "ElevenLabs not configured")
+            return False
+        
+        job_manager.update_progress(job_id, 40, JobStatus.PROCESSING)
+        await broadcast_progress(manager, job_id, 40, "Synthesizing speech...")
+        
+        output_path = Path(f"./uploads/{job_id}_voiceover.mp3")
+        
+        try:
+            audio = client.generate(
+                text=text,
+                voice=voice_id,
+                model="eleven_monolingual_v1"
+            )
+            
+            # Save the audio
+            with open(output_path, 'wb') as f:
+                for chunk in audio:
+                    f.write(chunk)
+                    
+        except Exception as e:
+            print(f"ElevenLabs generation failed: {e}")
+            job_manager.fail_job(job_id, str(e))
+            return False
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        await broadcast_progress(manager, job_id, 100, "Voiceover generated!")
+        
+        job_manager.complete_job(job_id, str(output_path), {
+            "operation": "voiceover",
+            "voice_id": voice_id,
+            "text_length": len(text)
+        })
+        
+        return True
+        
+    except Exception as e:
+        print(f"Voiceover generation failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
+
+
+async def add_voiceover_to_video_async(job_id: str, video_path: str, audio_path: str, manager=None) -> bool:
+    """Add voiceover audio track to video"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        await broadcast_progress(manager, job_id, 10, "Mixing audio...")
+        
+        output_path = Path(f"./uploads/{job_id}_with_voiceover.mp4")
+        
+        # Mix original audio with voiceover
+        cmd = [
+            'ffmpeg', '-i', video_path, '-i', audio_path,
+            '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=2[a]',
+            '-map', '0:v', '-map', '[a]',
+            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+            '-y', str(output_path)
+        ]
+        
+        if not run_ffmpeg(cmd):
+            # Fallback: replace audio entirely
+            cmd = [
+                'ffmpeg', '-i', video_path, '-i', audio_path,
+                '-map', '0:v', '-map', '1:a',
+                '-c:v', 'copy', '-c:a', 'aac',
+                '-shortest', '-y', str(output_path)
+            ]
+            run_ffmpeg(cmd)
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        await broadcast_progress(manager, job_id, 100, "Voiceover added!")
+        
+        job_manager.complete_job(job_id, str(output_path), {"operation": "add_voiceover"})
+        return True
+        
+    except Exception as e:
+        print(f"Add voiceover failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
+
+
+# ============================================
+# AI Summary with Gemini
+# ============================================
+
+async def generate_ai_summary_async(job_id: str, video_path: str, manager=None) -> bool:
+    """Generate AI summary of video content using Gemini"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        await broadcast_progress(manager, job_id, 10, "Analyzing video content...")
+        
+        # First get transcript
+        audio_path = Path(f"./uploads/{job_id}_summary_audio.wav")
+        cmd = ['ffmpeg', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', '-y', str(audio_path)]
+        run_ffmpeg(cmd)
+        
+        job_manager.update_progress(job_id, 30, JobStatus.PROCESSING)
+        await broadcast_progress(manager, job_id, 30, "Transcribing for analysis...")
+        
+        # Get transcript
+        transcript = ""
+        client = get_openai_client()
+        if client:
+            try:
+                with open(audio_path, "rb") as f:
+                    result = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f,
+                        response_format="text"
+                    )
+                transcript = result
+            except:
+                pass
+        
+        if audio_path.exists():
+            audio_path.unlink()
+        
+        if not transcript:
+            job_manager.fail_job(job_id, "Could not transcribe video")
+            return False
+        
+        job_manager.update_progress(job_id, 60, JobStatus.PROCESSING)
+        await broadcast_progress(manager, job_id, 60, "Generating AI summary...")
+        
+        # Generate summary with Gemini
+        summary = ""
+        highlights = []
+        
+        gemini = get_gemini_client()
+        if gemini:
+            try:
+                prompt = f"""Analyze this video transcript and provide:
+1. A brief summary (2-3 sentences)
+2. Key topics discussed (bullet points)
+3. Best moments/highlights that could be clipped (with estimated timestamps if possible)
+
+Transcript:
+{transcript[:4000]}  # Limit to avoid token limits
+"""
+                response = gemini.generate_content(prompt)
+                summary = response.text
+            except Exception as e:
+                print(f"Gemini failed: {e}")
+                # Fallback to OpenAI
+                if client:
+                    try:
+                        response = client.chat.completions.create(
+                            model="gpt-3.5-turbo",
+                            messages=[
+                                {"role": "system", "content": "You are a video content analyst."},
+                                {"role": "user", "content": f"Summarize this transcript briefly:\n\n{transcript[:3000]}"}
+                            ]
+                        )
+                        summary = response.choices[0].message.content
+                    except:
+                        summary = f"Transcript length: {len(transcript)} characters"
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        await broadcast_progress(manager, job_id, 100, "Summary generated!")
+        
+        job_manager.complete_job(job_id, video_path, {
+            "operation": "ai_summary",
+            "summary": summary,
+            "transcript_length": len(transcript)
+        })
+        
+        return True
+        
+    except Exception as e:
+        print(f"AI summary failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
+
+
+async def burn_subtitles_async(job_id: str, video_path: str, captions: List[Dict], style: str = "default", manager=None) -> bool:
+    """Burn subtitles into video using FFmpeg"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        await broadcast_progress(manager, job_id, 10, "Preparing subtitles...")
+        
+        # Create SRT file
+        srt_path = Path(f"./uploads/{job_id}_burn.srt")
+        write_srt_file(captions, str(srt_path))
+        
+        output_path = Path(f"./uploads/{job_id}_subtitled.mp4")
+        
+        # Define styles
+        styles = {
+            "default": "FontSize=24,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2",
+            "netflix": "FontSize=22,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=1,Shadow=1",
+            "youtube": "FontSize=20,PrimaryColour=&HFFFF00,OutlineColour=&H000000,Outline=2",
+            "karaoke": "FontSize=28,PrimaryColour=&H00FFFF,OutlineColour=&HFF00FF,Outline=3",
+            "minimal": "FontSize=18,PrimaryColour=&HFFFFFF,Outline=0"
+        }
+        
+        style_opts = styles.get(style, styles["default"])
+        
+        job_manager.update_progress(job_id, 40, JobStatus.PROCESSING)
+        await broadcast_progress(manager, job_id, 40, "Burning subtitles...")
+        
+        # Escape the path for FFmpeg filter
+        srt_escaped = str(srt_path).replace('\\', '/').replace(':', '\\:')
+        
+        cmd = [
+            'ffmpeg', '-i', video_path,
+            '-vf', f"subtitles='{srt_escaped}':force_style='{style_opts}'",
+            '-c:v', 'libx264', '-preset', 'fast',
+            '-c:a', 'copy',
+            '-y', str(output_path)
+        ]
+        
+        if not run_ffmpeg(cmd, timeout=600):
+            # Fallback without styling
+            cmd = [
+                'ffmpeg', '-i', video_path,
+                '-vf', f"subtitles='{srt_escaped}'",
+                '-c:v', 'libx264', '-preset', 'fast',
+                '-c:a', 'copy',
+                '-y', str(output_path)
+            ]
+            run_ffmpeg(cmd, timeout=600)
+        
+        # Cleanup
+        if srt_path.exists():
+            srt_path.unlink()
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        await broadcast_progress(manager, job_id, 100, "Subtitles burned!")
+        
+        job_manager.complete_job(job_id, str(output_path), {
+            "operation": "burn_subtitles",
+            "style": style,
+            "caption_count": len(captions)
+        })
+        
+        return True
+        
+    except Exception as e:
+        print(f"Burn subtitles failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False

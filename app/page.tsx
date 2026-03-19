@@ -163,6 +163,34 @@ async function isBackendAvailable(): Promise<boolean> {
   }
 }
 
+async function getHealthStatus() {
+  return (await api.get('/health')).data
+}
+
+// Voiceover
+async function generateVoiceover(jobId: string, text: string, voiceId: string = "21m00Tcm4TlvDq8ikWAM") {
+  return (await api.post(`/voiceover/generate/${jobId}`, { text, voice_id: voiceId })).data
+}
+
+async function getVoices() {
+  return (await api.get('/voiceover/voices')).data
+}
+
+// AI Summary
+async function generateAISummary(jobId: string) {
+  return (await api.post(`/ai/summary/${jobId}`)).data
+}
+
+// Burn subtitles with style
+async function burnSubtitlesStyled(jobId: string, captions: any[], style: string = "default") {
+  return (await api.post(`/subtitles/burn/${jobId}`, { captions, style })).data
+}
+
+// Save and load captions
+async function saveCaptions(jobId: string, captions: any[]) {
+  return (await api.post(`/captions/${jobId}`, { captions })).data
+}
+
 // ============================================
 // Editor Store
 // ============================================
@@ -591,6 +619,289 @@ function AIEnhancePanel() {
           <p className="text-xs text-white/70 mt-1">Silence, stabilize, denoise, color</p>
         </button>
       </div>
+    </div>
+  )
+}
+
+// ============================================
+// Voiceover Panel
+// ============================================
+function VoiceoverPanel() {
+  const { jobId, setProcessing, setProcessingProgress, setVideoUrl } = useEditorStore()
+  const [text, setText] = useState('')
+  const [selectedVoice, setSelectedVoice] = useState('21m00Tcm4TlvDq8ikWAM')
+  const [voices, setVoices] = useState<{ id: string; name: string; accent: string }[]>([])
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  useEffect(() => {
+    getVoices().then(data => setVoices(data.voices || [])).catch(() => {})
+  }, [])
+
+  const handleGenerate = async () => {
+    if (!jobId || !text.trim()) return
+    setIsGenerating(true)
+    setProcessing(true, 'Generating voiceover...')
+    
+    try {
+      await generateVoiceover(jobId, text, selectedVoice)
+      await pollJobStatus(jobId, (progress, status) => {
+        setProcessingProgress(progress)
+        setProcessing(true, `Voiceover: ${status} (${progress}%)`)
+      })
+      setVideoUrl(getProcessedStreamUrl(jobId))
+    } catch (e) {
+      console.error('Voiceover failed:', e)
+    } finally {
+      setIsGenerating(false)
+      setProcessing(false)
+    }
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Mic className="w-5 h-5 text-violet-400" />
+        <h2 className="text-lg font-semibold">Voiceover</h2>
+      </div>
+
+      {!jobId && (
+        <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-yellow-400 text-sm">
+          Upload a video first
+        </div>
+      )}
+
+      {jobId && (
+        <>
+          <div>
+            <label className="text-sm text-zinc-400 mb-2 block">Voice</label>
+            <select
+              value={selectedVoice}
+              onChange={(e) => setSelectedVoice(e.target.value)}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
+            >
+              {voices.length > 0 ? voices.map(voice => (
+                <option key={voice.id} value={voice.id}>{voice.name} ({voice.accent})</option>
+              )) : (
+                <>
+                  <option value="21m00Tcm4TlvDq8ikWAM">Rachel (American)</option>
+                  <option value="EXAVITQu4vr4xnSDxMaL">Bella (American)</option>
+                  <option value="TxGEqnHWrfWFTfGW9XjX">Josh (American)</option>
+                </>
+              )}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm text-zinc-400 mb-2 block">Script</label>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Enter the voiceover script..."
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm min-h-32 resize-none"
+            />
+            <p className="text-xs text-zinc-500 mt-1">{text.length} characters</p>
+          </div>
+
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating || !text.trim()}
+            className="w-full p-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Mic className="w-5 h-5" />
+                Generate Voiceover
+              </>
+            )}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================
+// Captions Panel
+// ============================================
+function CaptionsPanel() {
+  const { jobId, currentTime, setProcessing, setProcessingProgress, setVideoUrl } = useEditorStore()
+  const [captions, setCaptions] = useState<{ id: number; start: number; end: number; text: string }[]>([])
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [selectedStyle, setSelectedStyle] = useState('default')
+  const [editingId, setEditingId] = useState<number | null>(null)
+
+  const styles = [
+    { id: 'default', name: 'Default', description: 'White with black outline' },
+    { id: 'netflix', name: 'Netflix', description: 'Clean and minimal' },
+    { id: 'youtube', name: 'YouTube', description: 'Yellow with shadow' },
+    { id: 'karaoke', name: 'Karaoke', description: 'Colorful and bold' },
+    { id: 'minimal', name: 'Minimal', description: 'Simple white text' },
+  ]
+
+  const loadCaptions = async () => {
+    if (!jobId) return
+    try {
+      const data = await getCaptions(jobId)
+      if (data.captions) setCaptions(data.captions)
+    } catch {}
+  }
+
+  useEffect(() => {
+    loadCaptions()
+  }, [jobId])
+
+  const handleGenerate = async () => {
+    if (!jobId) return
+    setIsGenerating(true)
+    setProcessing(true, 'Generating captions...')
+    
+    try {
+      await generateCaptions(jobId)
+      const job = await pollJobStatus(jobId, (progress, status) => {
+        setProcessingProgress(progress)
+        setProcessing(true, `Captions: ${status} (${progress}%)`)
+      })
+      
+      // Load the generated captions
+      await loadCaptions()
+    } catch (e) {
+      console.error('Caption generation failed:', e)
+    } finally {
+      setIsGenerating(false)
+      setProcessing(false)
+    }
+  }
+
+  const handleBurn = async () => {
+    if (!jobId || captions.length === 0) return
+    setProcessing(true, 'Burning subtitles...')
+    
+    try {
+      await burnSubtitlesStyled(jobId, captions, selectedStyle)
+      await pollJobStatus(jobId, (progress, status) => {
+        setProcessingProgress(progress)
+        setProcessing(true, `Burning: ${status} (${progress}%)`)
+      })
+      setVideoUrl(getProcessedStreamUrl(jobId))
+    } catch (e) {
+      console.error('Burn subtitles failed:', e)
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const handleSave = async () => {
+    if (!jobId) return
+    await saveCaptions(jobId, captions)
+  }
+
+  const updateCaption = (id: number, field: string, value: string | number) => {
+    setCaptions(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
+  }
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+    const s = Math.floor(seconds % 60)
+    return `${m}:${s.toString().padStart(2, '0')}`
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Subtitles className="w-5 h-5 text-violet-400" />
+          <h2 className="text-lg font-semibold">Captions</h2>
+        </div>
+        {captions.length > 0 && (
+          <span className="text-xs text-zinc-500">{captions.length} captions</span>
+        )}
+      </div>
+
+      {!jobId && (
+        <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-yellow-400 text-sm">
+          Upload a video first
+        </div>
+      )}
+
+      {jobId && (
+        <>
+          <div className="flex gap-2">
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              className="flex-1 p-3 bg-violet-600 hover:bg-violet-700 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              Generate
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={captions.length === 0}
+              className="p-3 bg-zinc-700 hover:bg-zinc-600 rounded-xl disabled:opacity-50"
+            >
+              <Check className="w-4 h-4" />
+            </button>
+          </div>
+
+          {captions.length > 0 && (
+            <>
+              <div>
+                <label className="text-sm text-zinc-400 mb-2 block">Subtitle Style</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {styles.map(style => (
+                    <button
+                      key={style.id}
+                      onClick={() => setSelectedStyle(style.id)}
+                      className={`p-2 rounded-lg text-left text-sm transition-all ${selectedStyle === style.id ? 'bg-violet-600/20 border border-violet-500' : 'bg-zinc-800 border border-transparent hover:bg-zinc-700'}`}
+                    >
+                      <span className="font-medium">{style.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="max-h-64 overflow-y-auto space-y-2">
+                {captions.map((caption) => (
+                  <div
+                    key={caption.id}
+                    onClick={() => setEditingId(editingId === caption.id ? null : caption.id)}
+                    className={`p-3 rounded-lg cursor-pointer transition-all ${currentTime >= caption.start && currentTime <= caption.end ? 'bg-violet-600/20 border border-violet-500/30' : 'bg-zinc-800 hover:bg-zinc-700'}`}
+                  >
+                    <div className="flex items-center justify-between text-xs text-zinc-500 mb-1">
+                      <span>{formatTime(caption.start)} - {formatTime(caption.end)}</span>
+                    </div>
+                    {editingId === caption.id ? (
+                      <input
+                        type="text"
+                        value={caption.text}
+                        onChange={(e) => updateCaption(caption.id, 'text', e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-sm"
+                        autoFocus
+                      />
+                    ) : (
+                      <p className="text-sm">{caption.text}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={handleBurn}
+                className="w-full p-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 rounded-xl flex items-center justify-center gap-2"
+              >
+                <Type className="w-5 h-5" />
+                Burn Subtitles into Video
+              </button>
+            </>
+          )}
+        </>
+      )}
     </div>
   )
 }

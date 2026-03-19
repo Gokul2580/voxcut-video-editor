@@ -12,6 +12,9 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from job_manager import job_manager, JobStatus
+from dotenv import load_dotenv
+load_dotenv()
+
 from processing_tasks import (
     process_video_async,
     remove_silence_async,
@@ -28,7 +31,11 @@ from processing_tasks import (
     add_text_overlay_async,
     apply_transition_async,
     merge_clips_async,
-    auto_enhance_async
+    auto_enhance_async,
+    generate_voiceover_async,
+    add_voiceover_to_video_async,
+    generate_ai_summary_async,
+    burn_subtitles_async
 )
 
 # Create directories
@@ -792,11 +799,120 @@ async def delete_job(job_id: str):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    # Check which APIs are available
+    api_status = {
+        "openai": bool(os.getenv("OPENAI_API_KEY")),
+        "assemblyai": bool(os.getenv("ASSEMBLYAI_API_KEY")),
+        "gemini": bool(os.getenv("GEMINI_API_KEY")),
+        "elevenlabs": bool(os.getenv("ELEVENLABS_API_KEY"))
+    }
+    
     return {
         "status": "healthy", 
         "version": "3.0.0",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "apis": api_status
     }
+
+
+# ============================================
+# Text-to-Speech / Voiceover Endpoints
+# ============================================
+
+class VoiceoverRequest(BaseModel):
+    text: str
+    voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # Default Rachel voice
+
+
+@app.post("/voiceover/generate/{job_id}")
+async def generate_voiceover(job_id: str, request: VoiceoverRequest, background_tasks: BackgroundTasks):
+    """Generate voiceover audio using ElevenLabs"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if not os.getenv("ELEVENLABS_API_KEY"):
+        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
+    
+    background_tasks.add_task(
+        generate_voiceover_async, job_id, request.text, request.voice_id, manager
+    )
+    
+    return {"status": "processing", "operation": "voiceover", "job_id": job_id}
+
+
+@app.post("/voiceover/add/{job_id}")
+async def add_voiceover(job_id: str, audio_path: str, background_tasks: BackgroundTasks):
+    """Add voiceover audio to video"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    video_path = job.processed_file or job.original_file
+    background_tasks.add_task(
+        add_voiceover_to_video_async, job_id, video_path, audio_path, manager
+    )
+    
+    return {"status": "processing", "operation": "add_voiceover", "job_id": job_id}
+
+
+@app.get("/voiceover/voices")
+async def list_voices():
+    """List available ElevenLabs voices"""
+    voices = [
+        {"id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "accent": "American"},
+        {"id": "AZnzlk1XvdvUeBnXmlld", "name": "Domi", "accent": "American"},
+        {"id": "EXAVITQu4vr4xnSDxMaL", "name": "Bella", "accent": "American"},
+        {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni", "accent": "American"},
+        {"id": "MF3mGyEYCl7XYWbV9V6O", "name": "Elli", "accent": "American"},
+        {"id": "TxGEqnHWrfWFTfGW9XjX", "name": "Josh", "accent": "American"},
+        {"id": "VR6AewLTigWG4xSOukaG", "name": "Arnold", "accent": "American"},
+        {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "accent": "American"},
+        {"id": "yoZ06aMxZJJ28mfd3POQ", "name": "Sam", "accent": "American"},
+    ]
+    return {"voices": voices}
+
+
+# ============================================
+# AI Summary Endpoint
+# ============================================
+
+@app.post("/ai/summary/{job_id}")
+async def generate_summary(job_id: str, background_tasks: BackgroundTasks):
+    """Generate AI summary of video content"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    background_tasks.add_task(
+        generate_ai_summary_async, job_id, job.original_file, manager
+    )
+    
+    return {"status": "processing", "operation": "ai_summary", "job_id": job_id}
+
+
+# ============================================
+# Burn Subtitles with Style
+# ============================================
+
+class BurnSubtitlesRequest(BaseModel):
+    captions: List[dict]
+    style: str = "default"
+
+
+@app.post("/subtitles/burn/{job_id}")
+async def burn_subtitles_styled(job_id: str, request: BurnSubtitlesRequest, background_tasks: BackgroundTasks):
+    """Burn subtitles into video with custom styling"""
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    video_path = job.processed_file or job.original_file
+    background_tasks.add_task(
+        burn_subtitles_async, job_id, video_path, request.captions, request.style, manager
+    )
+    
+    return {"status": "processing", "operation": "burn_subtitles", "job_id": job_id}
 
 
 if __name__ == "__main__":

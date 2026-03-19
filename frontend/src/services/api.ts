@@ -286,3 +286,67 @@ export async function pollJobStatus(
     poll()
   })
 }
+
+// ============================================
+// Voiceover / Text-to-Speech
+// ============================================
+
+export interface Voice {
+  id: string
+  name: string
+  accent: string
+}
+
+export async function generateVoiceover(jobId: string, text: string, voiceId: string = "21m00Tcm4TlvDq8ikWAM"): Promise<ProcessingResult> {
+  const response = await api.post(`/voiceover/generate/${jobId}`, { text, voice_id: voiceId })
+  return response.data
+}
+
+export async function addVoiceoverToVideo(jobId: string, audioPath: string): Promise<ProcessingResult> {
+  const response = await api.post(`/voiceover/add/${jobId}`, null, { params: { audio_path: audioPath } })
+  return response.data
+}
+
+export async function getVoices(): Promise<{ voices: Voice[] }> {
+  const response = await api.get('/voiceover/voices')
+  return response.data
+}
+
+// ============================================
+// AI Summary
+// ============================================
+
+export async function generateAISummary(jobId: string): Promise<ProcessingResult> {
+  const response = await api.post(`/ai/summary/${jobId}`)
+  return response.data
+}
+
+// ============================================
+// Burn Subtitles with Style
+// ============================================
+
+export async function burnSubtitlesStyled(jobId: string, captions: Caption[], style: string = "default"): Promise<ProcessingResult> {
+  const response = await api.post(`/subtitles/burn/${jobId}`, { captions, style })
+  return response.data
+}
+
+// ============================================
+// Health check with API status
+// ============================================
+
+export interface HealthStatus {
+  status: string
+  version: string
+  timestamp: string
+  apis: {
+    openai: boolean
+    assemblyai: boolean
+    gemini: boolean
+    elevenlabs: boolean
+  }
+}
+
+export async function getHealthStatus(): Promise<HealthStatus> {
+  const response = await api.get('/health')
+  return response.data
+}
