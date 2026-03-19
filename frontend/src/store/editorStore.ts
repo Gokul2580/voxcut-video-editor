@@ -54,6 +54,7 @@ export interface EditorState {
   videoFile: File | null
   videoUrl: string | null
   videoDuration: number
+  jobId: string | null
   isPlaying: boolean
   currentTime: number
   volume: number
@@ -81,6 +82,7 @@ export interface EditorState {
   setVideoFile: (file: File | null) => void
   setVideoUrl: (url: string | null) => void
   setVideoDuration: (duration: number) => void
+  setJobId: (jobId: string | null) => void
   setIsPlaying: (playing: boolean) => void
   setCurrentTime: (time: number) => void
   setVolume: (volume: number) => void
@@ -120,6 +122,7 @@ const initialState = {
   videoFile: null,
   videoUrl: null,
   videoDuration: 0,
+  jobId: null,
   isPlaying: false,
   currentTime: 0,
   volume: 1,
@@ -144,6 +147,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setVideoFile: (file) => set({ videoFile: file }),
   setVideoUrl: (url) => set({ videoUrl: url }),
   setVideoDuration: (duration) => set({ videoDuration: duration }),
+  setJobId: (jobId) => set({ jobId }),
   setIsPlaying: (playing) => set({ isPlaying: playing }),
   setCurrentTime: (time) => set({ currentTime: time }),
   setVolume: (volume) => set({ volume: volume }),

@@ -8,10 +8,12 @@ import {
   Volume2,
   VolumeX,
   Maximize,
+  Minimize,
   RotateCcw,
   Scissors,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  Settings
 } from 'lucide-react'
 
 export function VideoPreview() {
@@ -35,7 +37,10 @@ export function VideoPreview() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const [previewScale, setPreviewScale] = useState(1)
+  const [isVideoLoaded, setIsVideoLoaded] = useState(false)
+  const [videoError, setVideoError] = useState<string | null>(null)
 
+  // Handle video events
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -46,52 +51,99 @@ export function VideoPreview() {
 
     const handleLoadedMetadata = () => {
       setVideoDuration(video.duration)
+      setIsVideoLoaded(true)
+      setVideoError(null)
     }
 
     const handleEnded = () => {
       setIsPlaying(false)
     }
 
+    const handleCanPlay = () => {
+      setIsVideoLoaded(true)
+      setVideoError(null)
+    }
+
+    const handleError = (e: Event) => {
+      console.error('Video error:', e)
+      setVideoError('Failed to load video. Please try again.')
+      setIsVideoLoaded(false)
+    }
+
+    const handleWaiting = () => {
+      // Video is buffering
+    }
+
     video.addEventListener('timeupdate', handleTimeUpdate)
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
     video.addEventListener('ended', handleEnded)
+    video.addEventListener('canplay', handleCanPlay)
+    video.addEventListener('error', handleError)
+    video.addEventListener('waiting', handleWaiting)
 
     return () => {
       video.removeEventListener('timeupdate', handleTimeUpdate)
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('ended', handleEnded)
+      video.removeEventListener('canplay', handleCanPlay)
+      video.removeEventListener('error', handleError)
+      video.removeEventListener('waiting', handleWaiting)
     }
   }, [setCurrentTime, setVideoDuration, setIsPlaying])
 
+  // Handle play/pause
   useEffect(() => {
     const video = videoRef.current
-    if (!video) return
+    if (!video || !isVideoLoaded) return
 
     if (isPlaying) {
-      video.play().catch(() => setIsPlaying(false))
+      video.play().catch((err) => {
+        console.error('Play failed:', err)
+        setIsPlaying(false)
+      })
     } else {
       video.pause()
     }
-  }, [isPlaying, setIsPlaying])
+  }, [isPlaying, isVideoLoaded, setIsPlaying])
 
+  // Handle volume changes
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     video.volume = isMuted ? 0 : volume
   }, [volume, isMuted])
 
+  // Handle playback rate changes
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     video.playbackRate = playbackRate
   }, [playbackRate])
 
+  // Reset video loaded state when URL changes
+  useEffect(() => {
+    setIsVideoLoaded(false)
+    setVideoError(null)
+  }, [videoUrl])
+
   const togglePlay = () => {
+    if (!isVideoLoaded) return
     setIsPlaying(!isPlaying)
   }
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value)
+    if (videoRef.current) {
+      videoRef.current.currentTime = time
+      setCurrentTime(time)
+    }
+  }
+
+  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const percentage = x / rect.width
+    const time = percentage * videoDuration
     if (videoRef.current) {
       videoRef.current.currentTime = time
       setCurrentTime(time)
@@ -116,19 +168,24 @@ export function VideoPreview() {
     }
   }
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = async () => {
     if (!containerRef.current) return
     
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen()
-      setIsFullscreen(true)
-    } else {
-      document.exitFullscreen()
-      setIsFullscreen(false)
+    try {
+      if (!document.fullscreenElement) {
+        await containerRef.current.requestFullscreen()
+        setIsFullscreen(true)
+      } else {
+        await document.exitFullscreen()
+        setIsFullscreen(false)
+      }
+    } catch (err) {
+      console.error('Fullscreen error:', err)
     }
   }
 
   const formatTime = (seconds: number) => {
+    if (!isFinite(seconds)) return '00:00.00'
     const mins = Math.floor(seconds / 60)
     const secs = Math.floor(seconds % 60)
     const ms = Math.floor((seconds % 1) * 100)
@@ -136,6 +193,7 @@ export function VideoPreview() {
   }
 
   const playbackRates = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2]
+  const progressPercentage = videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0
 
   return (
     <div 
@@ -150,20 +208,36 @@ export function VideoPreview() {
           className="relative bg-black rounded-lg overflow-hidden shadow-2xl"
           style={{ transform: `scale(${previewScale})` }}
         >
-          <video
-            ref={videoRef}
-            src={videoUrl || ''}
-            className="max-h-[calc(100vh-350px)] max-w-full"
-            onClick={togglePlay}
-          />
+          {videoError ? (
+            <div className="w-96 h-56 flex items-center justify-center bg-zinc-900 text-zinc-400">
+              <p className="text-center p-4">{videoError}</p>
+            </div>
+          ) : (
+            <video
+              ref={videoRef}
+              src={videoUrl || ''}
+              className="max-h-[calc(100vh-350px)] max-w-full"
+              onClick={togglePlay}
+              playsInline
+              crossOrigin="anonymous"
+              preload="auto"
+            />
+          )}
+          
+          {/* Loading indicator */}
+          {!isVideoLoaded && !videoError && videoUrl && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+              <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
           
           {/* Play/Pause Overlay */}
-          {!isPlaying && (
+          {!isPlaying && isVideoLoaded && (
             <div 
               className="absolute inset-0 flex items-center justify-center bg-black/30 cursor-pointer"
               onClick={togglePlay}
             >
-              <div className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <div className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors">
                 <Play className="w-10 h-10 text-white ml-1" />
               </div>
             </div>
@@ -196,26 +270,17 @@ export function VideoPreview() {
       }`}>
         {/* Progress Bar */}
         <div className="mb-3">
-          <input
-            type="range"
-            min={0}
-            max={videoDuration || 100}
-            step={0.01}
-            value={currentTime}
-            onChange={handleSeek}
-            className="w-full h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer
-              [&::-webkit-slider-thumb]:appearance-none
-              [&::-webkit-slider-thumb]:w-3
-              [&::-webkit-slider-thumb]:h-3
-              [&::-webkit-slider-thumb]:bg-violet-500
-              [&::-webkit-slider-thumb]:rounded-full
-              [&::-webkit-slider-thumb]:cursor-pointer
-              [&::-webkit-slider-thumb]:transition-all
-              [&::-webkit-slider-thumb]:hover:scale-125"
-            style={{
-              background: `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${(currentTime / videoDuration) * 100}%, #3f3f46 ${(currentTime / videoDuration) * 100}%, #3f3f46 100%)`
-            }}
-          />
+          <div 
+            className="w-full h-2 bg-zinc-700 rounded-full cursor-pointer group"
+            onClick={handleProgressClick}
+          >
+            <div 
+              className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full relative"
+              style={{ width: `${progressPercentage}%` }}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg" />
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center justify-between">
@@ -231,7 +296,8 @@ export function VideoPreview() {
             
             <button
               onClick={togglePlay}
-              className="p-3 bg-violet-600 hover:bg-violet-700 rounded-lg transition-colors"
+              disabled={!isVideoLoaded}
+              className="p-3 bg-violet-600 hover:bg-violet-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isPlaying ? (
                 <Pause className="w-5 h-5" />
@@ -269,17 +335,20 @@ export function VideoPreview() {
           {/* Right Controls */}
           <div className="flex items-center gap-3">
             {/* Playback Speed */}
-            <select
-              value={playbackRate}
-              onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
-              className="bg-[#1a1a24] border border-zinc-700 rounded-lg px-2 py-1 text-sm focus:outline-none focus:border-violet-500"
-            >
-              {playbackRates.map((rate) => (
-                <option key={rate} value={rate}>
-                  {rate}x
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1">
+              <Settings className="w-4 h-4 text-zinc-500" />
+              <select
+                value={playbackRate}
+                onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
+                className="bg-[#1a1a24] border border-zinc-700 rounded-lg px-2 py-1 text-sm focus:outline-none focus:border-violet-500"
+              >
+                {playbackRates.map((rate) => (
+                  <option key={rate} value={rate}>
+                    {rate}x
+                  </option>
+                ))}
+              </select>
+            </div>
 
             {/* Volume */}
             <div className="flex items-center gap-2">
@@ -314,7 +383,11 @@ export function VideoPreview() {
               onClick={toggleFullscreen}
               className="p-2 hover:bg-white/10 rounded-lg transition-colors"
             >
-              <Maximize className="w-5 h-5" />
+              {isFullscreen ? (
+                <Minimize className="w-5 h-5" />
+              ) : (
+                <Maximize className="w-5 h-5" />
+              )}
             </button>
           </div>
         </div>

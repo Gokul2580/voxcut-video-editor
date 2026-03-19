@@ -92,7 +92,7 @@ async def upload_video(
 
 @app.get("/stream/{job_id}")
 async def stream_video(job_id: str):
-    """Stream original video file"""
+    """Stream original video file with range support"""
     job = job_manager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -101,16 +101,26 @@ async def stream_video(job_id: str):
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="Video file not found")
     
-    def iterfile():
-        with open(video_path, mode="rb") as file:
-            yield from file
+    # Get file size
+    file_size = video_path.stat().st_size
     
-    return StreamingResponse(
-        iterfile(),
-        media_type="video/mp4",
+    # Determine content type based on file extension
+    ext = video_path.suffix.lower()
+    content_type = {
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo'
+    }.get(ext, 'video/mp4')
+    
+    return FileResponse(
+        video_path,
+        media_type=content_type,
         headers={
             "Accept-Ranges": "bytes",
-            "Content-Disposition": f"inline; filename={video_path.name}"
+            "Content-Length": str(file_size),
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache"
         }
     )
 
@@ -123,17 +133,26 @@ async def stream_processed_video(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     
     if not job.processed_file:
-        raise HTTPException(status_code=400, detail="Video not yet processed")
+        # Return original if no processed file yet
+        video_path = Path(job.original_file)
+    else:
+        video_path = Path(job.processed_file)
     
-    video_path = Path(job.processed_file)
     if not video_path.exists():
-        raise HTTPException(status_code=404, detail="Processed video file not found")
+        raise HTTPException(status_code=404, detail="Video file not found")
     
-    def iterfile():
-        with open(video_path, mode="rb") as file:
-            yield from file
+    file_size = video_path.stat().st_size
     
-    return StreamingResponse(iterfile(), media_type="video/mp4")
+    return FileResponse(
+        video_path,
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache"
+        }
+    )
 
 
 @app.get("/job/{job_id}")

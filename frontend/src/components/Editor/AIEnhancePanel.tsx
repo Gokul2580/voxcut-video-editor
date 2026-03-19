@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useEditorStore } from '../../store/editorStore'
-import axios from 'axios'
+import * as api from '../../services/api'
 import {
   Wand2,
   Sparkles,
@@ -14,7 +14,8 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
-  ChevronRight
+  ChevronRight,
+  RefreshCw
 } from 'lucide-react'
 
 interface AITool {
@@ -23,6 +24,7 @@ interface AITool {
   description: string
   icon: typeof Wand2
   category: 'enhance' | 'audio' | 'edit' | 'generate'
+  endpoint: string
 }
 
 const AI_TOOLS: AITool[] = [
@@ -31,72 +33,80 @@ const AI_TOOLS: AITool[] = [
     name: 'Remove Silence',
     description: 'Automatically detect and remove silent parts',
     icon: Volume2,
-    category: 'audio'
+    category: 'audio',
+    endpoint: 'remove-silence'
   },
   {
     id: 'auto-captions',
     name: 'Auto Captions',
     description: 'Generate captions using AI speech recognition',
     icon: Subtitles,
-    category: 'generate'
+    category: 'generate',
+    endpoint: 'captions'
   },
   {
     id: 'stabilize',
     name: 'Stabilize Video',
     description: 'Reduce camera shake and jitter',
     icon: VideoIcon,
-    category: 'enhance'
+    category: 'enhance',
+    endpoint: 'stabilize'
   },
   {
     id: 'denoise-audio',
     name: 'Denoise Audio',
     description: 'Remove background noise from audio',
     icon: Volume2,
-    category: 'audio'
+    category: 'audio',
+    endpoint: 'denoise'
   },
   {
     id: 'color-correct',
     name: 'Auto Color',
     description: 'Automatically adjust colors and exposure',
     icon: Palette,
-    category: 'enhance'
-  },
-  {
-    id: 'smart-cut',
-    name: 'Smart Cut',
-    description: 'AI-powered jump cut detection',
-    icon: Scissors,
-    category: 'edit'
+    category: 'enhance',
+    endpoint: 'color-correct'
   },
   {
     id: 'scene-detect',
     name: 'Scene Detection',
     description: 'Automatically detect scene changes',
     icon: Zap,
-    category: 'edit'
+    category: 'edit',
+    endpoint: 'scene-detect'
+  },
+  {
+    id: 'smart-cut',
+    name: 'Smart Cut',
+    description: 'AI-powered jump cut detection',
+    icon: Scissors,
+    category: 'edit',
+    endpoint: 'remove-silence'
   },
   {
     id: 'speed-ramp',
     name: 'Speed Ramp',
     description: 'Create smooth speed transitions',
     icon: Clock,
-    category: 'edit'
+    category: 'edit',
+    endpoint: 'scene-detect'
   },
 ]
 
-const API_BASE = 'http://localhost:8000'
-
 export function AIEnhancePanel() {
   const { 
+    jobId,
     videoFile, 
     setProcessing, 
     setProcessingProgress,
-    videoUrl
+    setVideoUrl
   } = useEditorStore()
 
   const [activeTask, setActiveTask] = useState<string | null>(null)
   const [taskStatus, setTaskStatus] = useState<Record<string, 'idle' | 'processing' | 'done' | 'error'>>({})
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'enhance' | 'audio' | 'edit' | 'generate'>('all')
+  const [results, setResults] = useState<Record<string, unknown>>({})
 
   const categories = [
     { id: 'all', label: 'All Tools' },
@@ -110,82 +120,111 @@ export function AIEnhancePanel() {
     ? AI_TOOLS 
     : AI_TOOLS.filter(t => t.category === selectedCategory)
 
-  const runAITool = async (toolId: string) => {
-    if (!videoFile) {
+  const runAITool = async (tool: AITool) => {
+    if (!jobId) {
       alert('Please upload a video first')
       return
     }
 
-    setActiveTask(toolId)
-    setTaskStatus(prev => ({ ...prev, [toolId]: 'processing' }))
-    setProcessing(true, `Running ${AI_TOOLS.find(t => t.id === toolId)?.name}...`)
+    setActiveTask(tool.id)
+    setTaskStatus(prev => ({ ...prev, [tool.id]: 'processing' }))
+    setProcessing(true, `Running ${tool.name}...`)
+    setProcessingProgress(0)
 
     try {
-      // Create form data for upload
-      const formData = new FormData()
-      formData.append('video', videoFile)
+      let response: api.ProcessingResult
 
-      let endpoint = ''
-      switch (toolId) {
+      // Call the appropriate API endpoint
+      switch (tool.endpoint) {
         case 'remove-silence':
-          endpoint = '/process/remove-silence'
-          break
-        case 'auto-captions':
-          endpoint = '/process/captions'
+          response = await api.removeSilence(jobId)
           break
         case 'stabilize':
-          endpoint = '/process/stabilize'
+          response = await api.stabilizeVideo(jobId)
           break
-        case 'denoise-audio':
-          endpoint = '/process/denoise'
+        case 'denoise':
+          response = await api.denoiseAudio(jobId)
           break
-        case 'color-correct':
-          endpoint = '/process/color-correct'
-          break
-        case 'smart-cut':
-          endpoint = '/process/smart-cut'
+        case 'captions':
+          response = await api.generateCaptions(jobId)
           break
         case 'scene-detect':
-          endpoint = '/process/scene-detect'
+          response = await api.detectScenes(jobId)
           break
-        case 'speed-ramp':
-          endpoint = '/process/speed-ramp'
+        case 'color-correct':
+          response = await api.colorCorrect(jobId)
           break
         default:
           throw new Error('Unknown tool')
       }
 
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setProcessingProgress((prev: number) => Math.min(prev + 10, 90))
-      }, 500)
-
-      // For now, simulate the API call
-      await new Promise(resolve => setTimeout(resolve, 3000))
+      // Poll for completion
+      const job = await api.pollJobStatus(
+        jobId,
+        (progress, status) => {
+          setProcessingProgress(progress)
+          setProcessing(true, `${tool.name}: ${status} (${progress}%)`)
+        }
+      )
       
-      clearInterval(progressInterval)
-      setProcessingProgress(100)
-      setTaskStatus(prev => ({ ...prev, [toolId]: 'done' }))
-
-      // In production, make the actual API call:
-      // const response = await axios.post(`${API_BASE}${endpoint}`, formData, {
-      //   onUploadProgress: (progressEvent) => {
-      //     const progress = progressEvent.loaded / (progressEvent.total || 1) * 50
-      //     setProcessingProgress(progress)
-      //   }
-      // })
+      // Update video URL if there's a processed file
+      if (job.processed_file) {
+        setVideoUrl(api.getProcessedStreamUrl(jobId))
+      }
+      
+      // Store results
+      setResults(prev => ({ ...prev, [tool.id]: job.results }))
+      setTaskStatus(prev => ({ ...prev, [tool.id]: 'done' }))
 
     } catch (error) {
       console.error('AI tool error:', error)
-      setTaskStatus(prev => ({ ...prev, [toolId]: 'error' }))
+      setTaskStatus(prev => ({ ...prev, [tool.id]: 'error' }))
     } finally {
       setProcessing(false)
       setActiveTask(null)
       
       // Reset status after a delay
       setTimeout(() => {
-        setTaskStatus(prev => ({ ...prev, [toolId]: 'idle' }))
-      }, 3000)
+        setTaskStatus(prev => ({ ...prev, [tool.id]: 'idle' }))
+      }, 5000)
+    }
+  }
+
+  const runAutoEnhance = async () => {
+    if (!jobId) {
+      alert('Please upload a video first')
+      return
+    }
+
+    setActiveTask('auto-enhance')
+    setProcessing(true, 'Running Auto Enhance...')
+    setProcessingProgress(0)
+
+    try {
+      await api.autoEnhance(jobId, {
+        remove_silence: true,
+        stabilize: true,
+        denoise: true,
+        color_correct: true
+      })
+
+      // Poll for completion
+      await api.pollJobStatus(
+        jobId,
+        (progress, status) => {
+          setProcessingProgress(progress)
+          setProcessing(true, `Auto Enhance: ${status} (${progress}%)`)
+        }
+      )
+
+      setVideoUrl(api.getProcessedStreamUrl(jobId))
+      setTaskStatus(prev => ({ ...prev, 'auto-enhance': 'done' }))
+
+    } catch (error) {
+      console.error('Auto enhance error:', error)
+    } finally {
+      setProcessing(false)
+      setActiveTask(null)
     }
   }
 
@@ -228,9 +267,17 @@ export function AIEnhancePanel() {
       </div>
 
       {/* No Video Warning */}
-      {!videoFile && (
+      {!jobId && (
         <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-yellow-400 text-sm">
           Upload a video to use AI tools
+        </div>
+      )}
+
+      {/* Connected Status */}
+      {jobId && (
+        <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 text-sm flex items-center gap-2">
+          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+          Connected to backend - AI tools ready
         </div>
       )}
 
@@ -239,13 +286,13 @@ export function AIEnhancePanel() {
         {filteredTools.map((tool) => (
           <button
             key={tool.id}
-            onClick={() => runAITool(tool.id)}
-            disabled={activeTask !== null || !videoFile}
+            onClick={() => runAITool(tool)}
+            disabled={activeTask !== null || !jobId}
             className={`w-full p-3 rounded-xl text-left transition-all group ${
               activeTask === tool.id
                 ? 'bg-violet-600/20 border border-violet-500/30'
                 : 'bg-[#1a1a24] hover:bg-[#252532] border border-transparent'
-            } ${!videoFile ? 'opacity-50 cursor-not-allowed' : ''}`}
+            } ${!jobId ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-lg ${
@@ -273,15 +320,16 @@ export function AIEnhancePanel() {
       <div className="pt-4 border-t border-zinc-800">
         <h3 className="text-sm font-medium text-zinc-400 mb-3">Quick Enhance</h3>
         <button
-          onClick={() => {
-            // Run multiple tools
-            runAITool('remove-silence')
-          }}
-          disabled={!videoFile || activeTask !== null}
+          onClick={runAutoEnhance}
+          disabled={!jobId || activeTask !== null}
           className="w-full p-4 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <div className="flex items-center justify-center gap-2">
-            <Sparkles className="w-5 h-5" />
+            {activeTask === 'auto-enhance' ? (
+              <RefreshCw className="w-5 h-5 animate-spin" />
+            ) : (
+              <Sparkles className="w-5 h-5" />
+            )}
             <span className="font-semibold">Auto Enhance All</span>
           </div>
           <p className="text-xs text-white/70 mt-1">

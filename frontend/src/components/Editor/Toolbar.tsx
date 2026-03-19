@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useEditorStore } from '../../store/editorStore'
 import {
   Scissors,
@@ -7,11 +8,7 @@ import {
   FlipHorizontal,
   FlipVertical,
   Crop,
-  Move,
-  CornerUpLeft,
-  CornerUpRight,
-  Layers,
-  SplitSquareVertical
+  Layers
 } from 'lucide-react'
 
 interface ToolItem {
@@ -23,14 +20,47 @@ interface ToolItem {
 }
 
 export function Toolbar() {
-  const { selectedClipId, videoClips, removeVideoClip } = useEditorStore()
+  const { 
+    selectedClipId, 
+    videoClips, 
+    removeVideoClip, 
+    addVideoClip,
+    currentTime,
+    updateVideoClip,
+    playbackRate,
+    setPlaybackRate,
+    volume,
+    setVolume
+  } = useEditorStore()
+  
+  const [clipSpeed, setClipSpeed] = useState(1)
+  const [clipVolume, setClipVolume] = useState(100)
+  const [clipOpacity, setClipOpacity] = useState(100)
+
+  const selectedClip = videoClips.find(c => c.id === selectedClipId)
 
   const handleSplit = () => {
-    console.log('Split clip at current time')
+    if (selectedClip && currentTime > selectedClip.startTime && currentTime < selectedClip.endTime) {
+      // Create two clips from the split
+      const newClip = {
+        ...selectedClip,
+        id: `clip-${Date.now()}`,
+        startTime: currentTime,
+      }
+      updateVideoClip(selectedClip.id, { endTime: currentTime })
+      addVideoClip(newClip)
+    }
   }
 
   const handleDuplicate = () => {
-    console.log('Duplicate selected clip')
+    if (selectedClip) {
+      addVideoClip({
+        ...selectedClip,
+        id: `clip-${Date.now()}`,
+        startTime: selectedClip.endTime,
+        endTime: selectedClip.endTime + (selectedClip.endTime - selectedClip.startTime)
+      })
+    }
   }
 
   const handleDelete = () => {
@@ -40,19 +70,33 @@ export function Toolbar() {
   }
 
   const handleRotate = () => {
+    // Apply rotation effect
     console.log('Rotate clip')
   }
 
   const handleFlipH = () => {
+    // Apply horizontal flip
     console.log('Flip horizontal')
   }
 
   const handleFlipV = () => {
+    // Apply vertical flip
     console.log('Flip vertical')
   }
 
   const handleCrop = () => {
+    // Open crop dialog
     console.log('Crop clip')
+  }
+  
+  const handleSpeedChange = (value: number) => {
+    setClipSpeed(value)
+    setPlaybackRate(value)
+  }
+  
+  const handleVolumeChange = (value: number) => {
+    setClipVolume(value)
+    setVolume(value / 100)
   }
 
   const editTools: ToolItem[] = [
@@ -115,14 +159,15 @@ export function Toolbar() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm text-zinc-400">Playback Speed</span>
-            <span className="text-sm text-white">1.0x</span>
+            <span className="text-sm text-white">{clipSpeed}x</span>
           </div>
           <input
             type="range"
             min={0.25}
             max={4}
             step={0.25}
-            defaultValue={1}
+            value={clipSpeed}
+            onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
             className="w-full h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none
               [&::-webkit-slider-thumb]:w-3
@@ -142,14 +187,15 @@ export function Toolbar() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm text-zinc-400">Clip Volume</span>
-            <span className="text-sm text-white">100%</span>
+            <span className="text-sm text-white">{clipVolume}%</span>
           </div>
           <input
             type="range"
             min={0}
             max={200}
             step={1}
-            defaultValue={100}
+            value={clipVolume}
+            onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
             className="w-full h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none
               [&::-webkit-slider-thumb]:w-3
@@ -169,14 +215,15 @@ export function Toolbar() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm text-zinc-400">Clip Opacity</span>
-            <span className="text-sm text-white">100%</span>
+            <span className="text-sm text-white">{clipOpacity}%</span>
           </div>
           <input
             type="range"
             min={0}
             max={100}
             step={1}
-            defaultValue={100}
+            value={clipOpacity}
+            onChange={(e) => setClipOpacity(parseInt(e.target.value))}
             className="w-full h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none
               [&::-webkit-slider-thumb]:w-3

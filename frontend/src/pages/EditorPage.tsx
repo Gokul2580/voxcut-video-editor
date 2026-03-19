@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useEditorStore } from '../store/editorStore'
 import { Toolbar } from '../components/Editor/Toolbar'
 import { VideoPreview } from '../components/Editor/VideoPreview'
@@ -8,6 +8,7 @@ import { VoiceCommandBar } from '../components/Editor/VoiceCommandBar'
 import { AIEnhancePanel } from '../components/Editor/AIEnhancePanel'
 import { EffectsPanel } from '../components/Editor/EffectsPanel'
 import { ProcessingOverlay } from '../components/Editor/ProcessingOverlay'
+import { uploadVideo, getStreamUrl } from '../services/api'
 import { 
   Upload, 
   Film,
@@ -15,7 +16,9 @@ import {
   Wand2,
   Type,
   Music,
-  Layers
+  Layers,
+  Download,
+  Loader2
 } from 'lucide-react'
 
 export function EditorPage() {
@@ -23,36 +26,62 @@ export function EditorPage() {
     videoUrl, 
     setVideoFile, 
     setVideoUrl,
+    setJobId,
+    jobId,
     activePanel,
     setActivePanel,
     isProcessing,
     addVideoClip,
-    setVideoDuration
+    setVideoDuration,
+    processingMessage
   } = useEditorStore()
   
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = async (file: File) => {
     if (file && file.type.startsWith('video/')) {
       setVideoFile(file)
-      const url = URL.createObjectURL(file)
-      setVideoUrl(url)
+      setIsUploading(true)
+      setUploadProgress(0)
       
-      // Create a video element to get duration
-      const video = document.createElement('video')
-      video.src = url
-      video.onloadedmetadata = () => {
-        setVideoDuration(video.duration)
-        addVideoClip({
-          id: `clip-${Date.now()}`,
-          name: file.name,
-          src: url,
-          duration: video.duration,
-          startTime: 0,
-          endTime: video.duration,
-          trackIndex: 0
-        })
+      try {
+        // Create local URL for immediate preview
+        const localUrl = URL.createObjectURL(file)
+        setVideoUrl(localUrl)
+        
+        // Get video duration
+        const video = document.createElement('video')
+        video.src = localUrl
+        video.onloadedmetadata = () => {
+          setVideoDuration(video.duration)
+          addVideoClip({
+            id: `clip-${Date.now()}`,
+            name: file.name,
+            src: localUrl,
+            duration: video.duration,
+            startTime: 0,
+            endTime: video.duration,
+            trackIndex: 0
+          })
+        }
+        
+        // Upload to backend
+        const job = await uploadVideo(file)
+        setJobId(job.job_id)
+        
+        // Switch to streamed URL from backend
+        const streamUrl = getStreamUrl(job.job_id)
+        setVideoUrl(streamUrl)
+        
+        setUploadProgress(100)
+      } catch (error) {
+        console.error('Upload failed:', error)
+        // Keep using local URL if upload fails
+      } finally {
+        setIsUploading(false)
       }
     }
   }
@@ -73,6 +102,12 @@ export function EditorPage() {
     setIsDragging(false)
   }
 
+  const handleExport = () => {
+    if (jobId) {
+      window.open(`http://localhost:8000/download/${jobId}`, '_blank')
+    }
+  }
+
   const toolbarItems = [
     { id: 'tools', icon: Layers, label: 'Edit' },
     { id: 'effects', icon: Sparkles, label: 'Effects' },
@@ -84,7 +119,7 @@ export function EditorPage() {
   return (
     <div className="h-screen w-screen bg-[#0a0a0f] text-white flex flex-col overflow-hidden">
       {/* Processing Overlay */}
-      {isProcessing && <ProcessingOverlay />}
+      {isProcessing && <ProcessingOverlay message={processingMessage} />}
       
       {/* Top Bar */}
       <header className="h-14 bg-[#12121a] border-b border-[#1e1e2e] flex items-center justify-between px-4 shrink-0">
@@ -95,16 +130,42 @@ export function EditorPage() {
           </div>
           <span className="text-zinc-500 text-sm">|</span>
           <span className="text-zinc-400 text-sm">Untitled Project</span>
+          {jobId && (
+            <span className="text-xs text-green-400 bg-green-400/10 px-2 py-0.5 rounded">
+              Connected
+            </span>
+          )}
         </div>
         
         <div className="flex items-center gap-3">
           <VoiceCommandBar />
+          
+          {videoUrl && (
+            <button 
+              onClick={handleExport}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Export
+            </button>
+          )}
+          
           <button 
             onClick={() => fileInputRef.current?.click()}
-            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            disabled={isUploading}
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
           >
-            <Upload className="w-4 h-4" />
-            Import
+            {isUploading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Uploading...
+              </>
+            ) : (
+              <>
+                <Upload className="w-4 h-4" />
+                Import
+              </>
+            )}
           </button>
           <input
             ref={fileInputRef}

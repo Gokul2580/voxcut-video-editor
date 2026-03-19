@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useEditorStore } from '../../store/editorStore'
+import * as api from '../../services/api'
 import { Mic, MicOff, Loader2, X, Sparkles } from 'lucide-react'
 
 // Voice command patterns
@@ -24,6 +25,9 @@ const VOICE_COMMANDS = [
   { pattern: /enhance|improve/i, action: 'enhance', label: 'Enhance Video' },
   { pattern: /add\s*(auto\s*)?captions?|subtitle/i, action: 'captions', label: 'Add Captions' },
   { pattern: /denoise|remove\s*noise/i, action: 'denoise', label: 'Remove Noise' },
+  { pattern: /color\s*correct|fix\s*color/i, action: 'color-correct', label: 'Color Correct' },
+  { pattern: /detect\s*scenes?/i, action: 'scene-detect', label: 'Detect Scenes' },
+  { pattern: /export|download/i, action: 'export', label: 'Export Video' },
 ]
 
 export function VoiceCommandBar() {
@@ -34,7 +38,11 @@ export function VoiceCommandBar() {
     setVoiceTranscript,
     setIsPlaying,
     setVolume,
-    setProcessing
+    setPlaybackRate,
+    setProcessing,
+    setProcessingProgress,
+    setVideoUrl,
+    jobId
   } = useEditorStore()
 
   const [isSupported, setIsSupported] = useState(true)
@@ -77,7 +85,11 @@ export function VoiceCommandBar() {
     recognition.onend = () => {
       if (isListening) {
         // Restart if still supposed to be listening
-        recognition.start()
+        try {
+          recognition.start()
+        } catch (e) {
+          // Already started
+        }
       }
     }
 
@@ -86,7 +98,7 @@ export function VoiceCommandBar() {
     return () => {
       recognition.stop()
     }
-  }, [])
+  }, [isListening, setIsListening, setVoiceTranscript])
 
   const processVoiceCommand = async (transcript: string) => {
     for (const command of VOICE_COMMANDS) {
@@ -112,19 +124,30 @@ export function VoiceCommandBar() {
   const executeCommand = async (action: string, match: RegExpMatchArray) => {
     switch (action) {
       case 'remove-silence':
-        setProcessing(true, 'Removing silence...')
-        // Simulate processing
-        setTimeout(() => setProcessing(false), 3000)
+        if (jobId) {
+          setProcessing(true, 'Removing silence...')
+          try {
+            await api.removeSilence(jobId)
+            await api.pollJobStatus(jobId, (progress) => {
+              setProcessingProgress(progress)
+            })
+            setVideoUrl(api.getProcessedStreamUrl(jobId))
+          } catch (e) {
+            console.error('Remove silence failed:', e)
+          } finally {
+            setProcessing(false)
+          }
+        }
         break
       
       case 'speed-up':
         const speedUp = match[2] ? parseFloat(match[2]) : 1.5
-        console.log(`Speeding up to ${speedUp}x`)
+        setPlaybackRate(Math.min(speedUp, 2))
         break
       
       case 'slow-down':
         const speedDown = match[2] ? parseFloat(match[2]) : 0.5
-        console.log(`Slowing down to ${speedDown}x`)
+        setPlaybackRate(Math.max(speedDown, 0.25))
         break
       
       case 'play':
@@ -144,29 +167,122 @@ export function VoiceCommandBar() {
         break
       
       case 'stabilize':
-        setProcessing(true, 'Stabilizing video...')
-        setTimeout(() => setProcessing(false), 5000)
+        if (jobId) {
+          setProcessing(true, 'Stabilizing video...')
+          try {
+            await api.stabilizeVideo(jobId)
+            await api.pollJobStatus(jobId, (progress) => {
+              setProcessingProgress(progress)
+            })
+            setVideoUrl(api.getProcessedStreamUrl(jobId))
+          } catch (e) {
+            console.error('Stabilize failed:', e)
+          } finally {
+            setProcessing(false)
+          }
+        }
         break
       
       case 'enhance':
-        setProcessing(true, 'Enhancing video...')
-        setTimeout(() => setProcessing(false), 4000)
+        if (jobId) {
+          setProcessing(true, 'Enhancing video...')
+          try {
+            await api.autoEnhance(jobId, {
+              remove_silence: true,
+              stabilize: true,
+              denoise: true,
+              color_correct: true
+            })
+            await api.pollJobStatus(jobId, (progress) => {
+              setProcessingProgress(progress)
+            })
+            setVideoUrl(api.getProcessedStreamUrl(jobId))
+          } catch (e) {
+            console.error('Enhance failed:', e)
+          } finally {
+            setProcessing(false)
+          }
+        }
         break
       
       case 'captions':
-        setProcessing(true, 'Generating captions...')
-        setTimeout(() => setProcessing(false), 6000)
+        if (jobId) {
+          setProcessing(true, 'Generating captions...')
+          try {
+            await api.generateCaptions(jobId)
+            await api.pollJobStatus(jobId, (progress) => {
+              setProcessingProgress(progress)
+            })
+          } catch (e) {
+            console.error('Captions failed:', e)
+          } finally {
+            setProcessing(false)
+          }
+        }
         break
       
       case 'denoise':
-        setProcessing(true, 'Removing noise...')
-        setTimeout(() => setProcessing(false), 4000)
+        if (jobId) {
+          setProcessing(true, 'Removing noise...')
+          try {
+            await api.denoiseAudio(jobId)
+            await api.pollJobStatus(jobId, (progress) => {
+              setProcessingProgress(progress)
+            })
+            setVideoUrl(api.getProcessedStreamUrl(jobId))
+          } catch (e) {
+            console.error('Denoise failed:', e)
+          } finally {
+            setProcessing(false)
+          }
+        }
+        break
+
+      case 'color-correct':
+        if (jobId) {
+          setProcessing(true, 'Color correcting...')
+          try {
+            await api.colorCorrect(jobId)
+            await api.pollJobStatus(jobId, (progress) => {
+              setProcessingProgress(progress)
+            })
+            setVideoUrl(api.getProcessedStreamUrl(jobId))
+          } catch (e) {
+            console.error('Color correct failed:', e)
+          } finally {
+            setProcessing(false)
+          }
+        }
+        break
+
+      case 'scene-detect':
+        if (jobId) {
+          setProcessing(true, 'Detecting scenes...')
+          try {
+            await api.detectScenes(jobId)
+            await api.pollJobStatus(jobId, (progress) => {
+              setProcessingProgress(progress)
+            })
+          } catch (e) {
+            console.error('Scene detect failed:', e)
+          } finally {
+            setProcessing(false)
+          }
+        }
+        break
+
+      case 'export':
+        if (jobId) {
+          window.open(api.getDownloadUrl(jobId), '_blank')
+        }
         break
       
       case 'cut-range':
         const start = parseInt(match[1])
         const end = parseInt(match[3])
-        console.log(`Cutting from ${start}s to ${end}s`)
+        if (jobId) {
+          await api.executeCommand(jobId, 'cut', { start, end })
+        }
         break
       
       default:
@@ -182,8 +298,12 @@ export function VoiceCommandBar() {
       setIsListening(false)
       setVoiceTranscript('')
     } else {
-      recognitionRef.current.start()
-      setIsListening(true)
+      try {
+        recognitionRef.current.start()
+        setIsListening(true)
+      } catch (e) {
+        console.error('Failed to start recognition:', e)
+      }
     }
   }
 
@@ -191,7 +311,7 @@ export function VoiceCommandBar() {
     return (
       <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800/50 rounded-lg text-zinc-500 text-sm">
         <MicOff className="w-4 h-4" />
-        <span>Voice commands unavailable</span>
+        <span>Voice unavailable</span>
       </div>
     )
   }
@@ -242,7 +362,7 @@ export function VoiceCommandBar() {
             ? 'bg-red-500 text-white animate-pulse'
             : 'bg-[#1a1a24] text-zinc-400 hover:text-white hover:bg-[#252532]'
         }`}
-        title={isListening ? 'Stop listening' : 'Voice commands'}
+        title={isListening ? 'Stop listening' : 'Voice commands (say "remove silence", "play", "enhance", etc.)'}
       >
         {isListening ? (
           <MicOff className="w-5 h-5" />

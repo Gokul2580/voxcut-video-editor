@@ -1,11 +1,13 @@
 import { useEditorStore } from '../../store/editorStore'
+import { getDownloadUrl } from '../../services/api'
 import {
   Info,
   Clock,
   Maximize2,
   Film,
   FileVideo,
-  HardDrive
+  HardDrive,
+  Download
 } from 'lucide-react'
 
 export function PropertiesPanel() {
@@ -14,8 +16,17 @@ export function PropertiesPanel() {
     videoDuration, 
     selectedClipId, 
     videoClips,
-    updateVideoClip
+    updateVideoClip,
+    jobId
   } = useEditorStore()
+
+  const handleExport = () => {
+    if (jobId) {
+      window.open(getDownloadUrl(jobId), '_blank')
+    } else {
+      alert('Please upload a video first')
+    }
+  }
 
   const selectedClip = videoClips.find(c => c.id === selectedClipId)
 
@@ -156,7 +167,12 @@ export function PropertiesPanel() {
       </div>
 
       {/* Export Button */}
-      <button className="w-full py-3 bg-violet-600 hover:bg-violet-700 rounded-xl font-medium transition-colors">
+      <button 
+        onClick={handleExport}
+        disabled={!jobId}
+        className="w-full py-3 bg-violet-600 hover:bg-violet-700 rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      >
+        <Download className="w-5 h-5" />
         Export Video
       </button>
     </div>
