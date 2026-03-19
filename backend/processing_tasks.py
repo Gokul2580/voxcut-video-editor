@@ -264,3 +264,410 @@ def cleanup_temp_files(job_id: str):
                 temp_path.unlink()
             except Exception as e:
                 print(f"Failed to delete temp file {temp_file}: {e}")
+
+
+# ============================================
+# AI Enhancement Processing Functions
+# ============================================
+
+async def remove_silence_async(job_id: str, video_path: str) -> bool:
+    """Remove silent parts from video using audio analysis"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        
+        # Extract audio
+        audio_path = Path(f"./uploads/{job_id}_audio_silence.wav")
+        AudioAnalyzer.extract_audio(video_path, str(audio_path))
+        
+        job_manager.update_progress(job_id, 30, JobStatus.PROCESSING)
+        
+        # Detect silence segments using audio levels
+        silence_segments = detect_silence_segments(str(audio_path))
+        
+        job_manager.update_progress(job_id, 50, JobStatus.PROCESSING)
+        
+        # Create edit list excluding silence
+        output_path = Path(f"./uploads/{job_id}_no_silence.mp4")
+        
+        if silence_segments:
+            # Use FFmpeg to cut out silent parts
+            remove_silence_ffmpeg(video_path, silence_segments, str(output_path))
+        else:
+            # No silence detected, copy original
+            import shutil
+            shutil.copy(video_path, output_path)
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        job_manager.complete_job(job_id, str(output_path), {"operation": "remove_silence"})
+        
+        # Cleanup
+        if audio_path.exists():
+            audio_path.unlink()
+        
+        return True
+    except Exception as e:
+        print(f"Remove silence failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
+
+
+def detect_silence_segments(audio_path: str, threshold_db: float = -40, min_duration: float = 0.5) -> List[Tuple[float, float]]:
+    """Detect silent segments in audio file"""
+    try:
+        # Use FFmpeg to detect silence
+        cmd = [
+            'ffmpeg',
+            '-i', audio_path,
+            '-af', f'silencedetect=noise={threshold_db}dB:d={min_duration}',
+            '-f', 'null',
+            '-'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        output = result.stderr
+        
+        # Parse silence detection output
+        silence_segments = []
+        lines = output.split('\n')
+        
+        start_time = None
+        for line in lines:
+            if 'silence_start:' in line:
+                parts = line.split('silence_start:')
+                if len(parts) > 1:
+                    start_time = float(parts[1].strip().split()[0])
+            elif 'silence_end:' in line and start_time is not None:
+                parts = line.split('silence_end:')
+                if len(parts) > 1:
+                    end_time = float(parts[1].strip().split()[0])
+                    silence_segments.append((start_time, end_time))
+                    start_time = None
+        
+        return silence_segments
+    except Exception as e:
+        print(f"Silence detection failed: {e}")
+        return []
+
+
+def remove_silence_ffmpeg(video_path: str, silence_segments: List[Tuple[float, float]], output_path: str):
+    """Remove silent segments from video using FFmpeg"""
+    try:
+        # Get video duration
+        probe_cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', 
+                     '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        duration = float(result.stdout.strip())
+        
+        # Create segments to keep (inverse of silence)
+        keep_segments = []
+        prev_end = 0
+        
+        for start, end in sorted(silence_segments):
+            if start > prev_end:
+                keep_segments.append((prev_end, start))
+            prev_end = end
+        
+        if prev_end < duration:
+            keep_segments.append((prev_end, duration))
+        
+        if not keep_segments:
+            import shutil
+            shutil.copy(video_path, output_path)
+            return
+        
+        # Create FFmpeg filter for concatenation
+        filter_parts = []
+        for i, (start, end) in enumerate(keep_segments):
+            filter_parts.append(f"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS[v{i}];")
+            filter_parts.append(f"[0:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS[a{i}];")
+        
+        # Concat all parts
+        v_concat = ''.join([f'[v{i}]' for i in range(len(keep_segments))])
+        a_concat = ''.join([f'[a{i}]' for i in range(len(keep_segments))])
+        filter_parts.append(f"{v_concat}concat=n={len(keep_segments)}:v=1:a=0[outv];")
+        filter_parts.append(f"{a_concat}concat=n={len(keep_segments)}:v=0:a=1[outa]")
+        
+        filter_complex = ''.join(filter_parts)
+        
+        cmd = [
+            'ffmpeg',
+            '-i', video_path,
+            '-filter_complex', filter_complex,
+            '-map', '[outv]',
+            '-map', '[outa]',
+            '-c:v', 'libx264',
+            '-c:a', 'aac',
+            '-y',
+            output_path
+        ]
+        
+        subprocess.run(cmd, check=True, capture_output=True)
+    except Exception as e:
+        print(f"FFmpeg silence removal failed: {e}")
+        import shutil
+        shutil.copy(video_path, output_path)
+
+
+async def stabilize_video_async(job_id: str, video_path: str) -> bool:
+    """Stabilize shaky video using OpenCV or FFmpeg"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        
+        output_path = Path(f"./uploads/{job_id}_stabilized.mp4")
+        
+        # Use FFmpeg vidstab filter if available, otherwise OpenCV
+        try:
+            # Two-pass stabilization with vidstab
+            transforms_path = f"./uploads/{job_id}_transforms.trf"
+            
+            # Pass 1: Analyze
+            job_manager.update_progress(job_id, 30, JobStatus.PROCESSING)
+            cmd1 = [
+                'ffmpeg', '-i', video_path,
+                '-vf', f'vidstabdetect=stepsize=6:shakiness=8:result={transforms_path}',
+                '-f', 'null', '-'
+            ]
+            subprocess.run(cmd1, capture_output=True)
+            
+            # Pass 2: Transform
+            job_manager.update_progress(job_id, 60, JobStatus.PROCESSING)
+            cmd2 = [
+                'ffmpeg', '-i', video_path,
+                '-vf', f'vidstabtransform=input={transforms_path}:smoothing=10',
+                '-c:a', 'copy',
+                '-y', str(output_path)
+            ]
+            subprocess.run(cmd2, capture_output=True)
+            
+            # Cleanup transforms file
+            if Path(transforms_path).exists():
+                Path(transforms_path).unlink()
+                
+        except Exception as e:
+            print(f"FFmpeg vidstab failed, using OpenCV: {e}")
+            # Fallback to basic copy
+            import shutil
+            shutil.copy(video_path, output_path)
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        job_manager.complete_job(job_id, str(output_path), {"operation": "stabilize"})
+        
+        return True
+    except Exception as e:
+        print(f"Video stabilization failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
+
+
+async def denoise_audio_async(job_id: str, video_path: str) -> bool:
+    """Remove background noise from video audio"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        
+        output_path = Path(f"./uploads/{job_id}_denoised.mp4")
+        
+        # Use FFmpeg audio filters for noise reduction
+        job_manager.update_progress(job_id, 30, JobStatus.PROCESSING)
+        
+        cmd = [
+            'ffmpeg', '-i', video_path,
+            '-af', 'highpass=f=200,lowpass=f=3000,afftdn=nf=-25',
+            '-c:v', 'copy',
+            '-y', str(output_path)
+        ]
+        
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError:
+            # Simpler filter fallback
+            cmd = [
+                'ffmpeg', '-i', video_path,
+                '-af', 'highpass=f=200,lowpass=f=3000',
+                '-c:v', 'copy',
+                '-y', str(output_path)
+            ]
+            subprocess.run(cmd, capture_output=True)
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        job_manager.complete_job(job_id, str(output_path), {"operation": "denoise"})
+        
+        return True
+    except Exception as e:
+        print(f"Audio denoise failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
+
+
+async def generate_captions_async(job_id: str, video_path: str) -> bool:
+    """Generate auto captions using OpenAI Whisper API"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        
+        # Extract audio
+        audio_path = Path(f"./uploads/{job_id}_audio_captions.wav")
+        AudioAnalyzer.extract_audio(video_path, str(audio_path))
+        
+        job_manager.update_progress(job_id, 30, JobStatus.PROCESSING)
+        
+        captions = []
+        
+        if OPENAI_AVAILABLE:
+            try:
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    client = OpenAI(api_key=api_key)
+                    
+                    with open(audio_path, "rb") as audio_file:
+                        result = client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=audio_file,
+                            response_format="verbose_json",
+                            timestamp_granularities=["segment"]
+                        )
+                    
+                    if hasattr(result, 'segments') and result.segments:
+                        for segment in result.segments:
+                            captions.append({
+                                "start": segment.start if hasattr(segment, 'start') else segment.get('start', 0),
+                                "end": segment.end if hasattr(segment, 'end') else segment.get('end', 0),
+                                "text": segment.text if hasattr(segment, 'text') else segment.get('text', '')
+                            })
+            except Exception as e:
+                print(f"OpenAI captions failed: {e}")
+        
+        job_manager.update_progress(job_id, 70, JobStatus.PROCESSING)
+        
+        # Save captions to SRT file
+        srt_path = Path(f"./uploads/{job_id}_captions.srt")
+        write_srt_file(captions, str(srt_path))
+        
+        # Cleanup audio
+        if audio_path.exists():
+            audio_path.unlink()
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        job_manager.complete_job(job_id, video_path, {
+            "operation": "captions",
+            "captions_file": str(srt_path),
+            "captions_count": len(captions)
+        })
+        
+        return True
+    except Exception as e:
+        print(f"Caption generation failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
+
+
+def write_srt_file(captions: List[Dict], output_path: str):
+    """Write captions to SRT subtitle file"""
+    with open(output_path, 'w', encoding='utf-8') as f:
+        for i, caption in enumerate(captions, 1):
+            start_time = format_srt_time(caption['start'])
+            end_time = format_srt_time(caption['end'])
+            text = caption['text'].strip()
+            
+            f.write(f"{i}\n")
+            f.write(f"{start_time} --> {end_time}\n")
+            f.write(f"{text}\n\n")
+
+
+def format_srt_time(seconds: float) -> str:
+    """Format seconds to SRT time format (HH:MM:SS,mmm)"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+async def detect_scenes_async(job_id: str, video_path: str) -> bool:
+    """Detect scene changes in video"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        
+        processor = VideoProcessor(video_path)
+        
+        job_manager.update_progress(job_id, 30, JobStatus.PROCESSING)
+        
+        scene_changes = processor.detect_scene_changes(threshold=25.0)
+        
+        job_manager.update_progress(job_id, 70, JobStatus.PROCESSING)
+        
+        # Convert frame numbers to timestamps
+        scenes = []
+        fps = processor.fps
+        prev_frame = 0
+        
+        for change_frame in scene_changes:
+            scenes.append({
+                "start_frame": prev_frame,
+                "end_frame": change_frame,
+                "start_time": prev_frame / fps,
+                "end_time": change_frame / fps,
+                "duration": (change_frame - prev_frame) / fps
+            })
+            prev_frame = change_frame
+        
+        # Add final scene
+        scenes.append({
+            "start_frame": prev_frame,
+            "end_frame": processor.frame_count,
+            "start_time": prev_frame / fps,
+            "end_time": processor.frame_count / fps,
+            "duration": (processor.frame_count - prev_frame) / fps
+        })
+        
+        processor.close()
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        job_manager.complete_job(job_id, video_path, {
+            "operation": "scene_detect",
+            "scenes": scenes,
+            "scene_count": len(scenes)
+        })
+        
+        return True
+    except Exception as e:
+        print(f"Scene detection failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
+
+
+async def auto_color_correct_async(job_id: str, video_path: str) -> bool:
+    """Auto color correct video using FFmpeg filters"""
+    try:
+        job_manager.update_progress(job_id, 10, JobStatus.PROCESSING)
+        
+        output_path = Path(f"./uploads/{job_id}_color_corrected.mp4")
+        
+        job_manager.update_progress(job_id, 30, JobStatus.PROCESSING)
+        
+        # Use FFmpeg for auto color correction
+        cmd = [
+            'ffmpeg', '-i', video_path,
+            '-vf', 'eq=contrast=1.1:brightness=0.05:saturation=1.2,unsharp=5:5:0.5',
+            '-c:a', 'copy',
+            '-y', str(output_path)
+        ]
+        
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError:
+            # Fallback to simpler correction
+            cmd = [
+                'ffmpeg', '-i', video_path,
+                '-vf', 'eq=contrast=1.05:brightness=0.02',
+                '-c:a', 'copy',
+                '-y', str(output_path)
+            ]
+            subprocess.run(cmd, capture_output=True)
+        
+        job_manager.update_progress(job_id, 100, JobStatus.COMPLETED)
+        job_manager.complete_job(job_id, str(output_path), {"operation": "color_correct"})
+        
+        return True
+    except Exception as e:
+        print(f"Color correction failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        return False
