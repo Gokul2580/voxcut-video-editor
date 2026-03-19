@@ -4,9 +4,13 @@
 
 ---
 
+![VoxCut - The World's First Fully Voice-Controlled Video Editor](https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-EsOS37gCUOOMIIvoa8ooQOwESeeiCe.png)
+
+---
+
 ## The Reality We Want to Change
 
-Not everyone starts with the best resources.
+**Not everyone starts with the best resources.**
 
 There are thousands of creators from middle-class backgrounds who have powerful ideas, strong creativity, and real stories to tell. But they are often held back — not by lack of talent, but by lack of access to expensive devices and editing tools.
 
@@ -14,17 +18,19 @@ There are thousands of creators from middle-class backgrounds who have powerful 
 
 It turns raw, unedited videos into high-quality content without requiring technical skills or costly software.
 
-Because creativity should never depend on money. It should depend on **you**.
+*Because creativity should never depend on money. It should depend on you.*
 
 ---
 
 ## What is VoxCut?
 
-VoxCut is not just another video editor. It's a revolution.
+VoxCut is not just another video editor. **It's a revolution.**
 
-**The world's first fully voice-controlled video editing experience.**
+The world's first **fully voice-controlled** video editing experience.
 
-Upload your video. Speak your commands. Export your masterpiece. No clicks. No complex interfaces. No learning curve.
+**Upload your video. Speak your commands. Export your masterpiece.**
+
+No clicks. No complex interfaces. No learning curve.
 
 **Now, anybody can be a video editor.**
 
@@ -55,19 +61,19 @@ This is where the magic happens.
 
 After initial processing, VoxCut takes you to the **Voice Editing Screen** — a completely touch-free editing experience:
 
-- **"Trim the first 5 seconds"** — Done.
-- **"Add a fade out at the end"** — Done.
-- **"Make it brighter"** — Done.
-- **"Remove that part where I sneezed"** — Done.
-- **"Export to my phone"** — Done.
+- *"Trim the first 5 seconds"* — Done.
+- *"Add a fade out at the end"* — Done.
+- *"Make it brighter"* — Done.
+- *"Remove that part where I sneezed"* — Done.
+- *"Export to my phone"* — Done.
 
-No mouse. No keyboard. No touching the screen. Just your voice and your vision.
+**No mouse. No keyboard. No touching the screen. Just your voice and your vision.**
 
 ### Step 5: Voice-Controlled Export
 When you're happy with your edit, just say:
-- **"Export as Instagram Reel"**
-- **"Save in 4K"**
-- **"Download to my device"**
+- "Export as Instagram Reel"
+- "Save in 4K"
+- "Download to my device"
 
 And it's done. Professional content created entirely with your voice.
 
@@ -91,7 +97,7 @@ This creates an unfair advantage for those with resources, while talented creato
 
 ## Our Solution
 
-VoxCut brings professional-grade editing capabilities directly to your browser — completely free, accessible on any device, and controlled entirely by your voice.
+VoxCut brings professional-grade editing capabilities directly to your browser — **completely free**, accessible on any device, and controlled entirely by your voice.
 
 ### Intelligent Automation
 - **Automatic Junk Removal** — Our AI identifies and removes pauses, filler words, coughs, and mistakes
@@ -174,13 +180,13 @@ VoxCut brings professional-grade editing capabilities directly to your browser �
 
 We envision a world where the quality of your content is determined by the strength of your ideas, not the size of your wallet or the dexterity of your hands.
 
-VoxCut is more than a tool. It's a movement.
+**VoxCut is more than a tool. It's a movement.**
 
 We're not just building software. We're breaking down walls. We're opening doors. We're giving a voice to the voiceless — literally.
 
 **Creativity is a right, not a privilege.**
 
-**And now, your voice is your editor.**
+*And now, your voice is your editor.*
 
 ---
 
