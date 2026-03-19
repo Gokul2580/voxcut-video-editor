@@ -798,6 +798,206 @@ function Timeline() {
 }
 
 // ============================================
+// Voice Command Bar
+// ============================================
+function VoiceCommandBar() {
+  const { 
+    jobId, setIsPlaying, isPlaying, setCurrentTime, currentTime, videoDuration,
+    setPlaybackRate, playbackRate, setVolume, setProcessing, setProcessingProgress,
+    setVideoUrl, isListening, setIsListening
+  } = useEditorStore()
+  
+  const [transcript, setTranscript] = useState('')
+  const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const recognitionRef = useRef<any>(null)
+
+  const showFeedback = (message: string, type: 'success' | 'error' | 'info') => {
+    setFeedback({ message, type })
+    setTimeout(() => setFeedback(null), 3000)
+  }
+
+  const executeCommand = async (command: string) => {
+    const cmd = command.toLowerCase().trim()
+    
+    // Playback commands
+    if (cmd.includes('play')) { setIsPlaying(true); showFeedback('Playing video', 'success'); return }
+    if (cmd.includes('pause') || cmd.includes('stop')) { setIsPlaying(false); showFeedback('Paused video', 'success'); return }
+    if (cmd.includes('mute')) { setVolume(0); showFeedback('Muted', 'success'); return }
+    if (cmd.includes('unmute')) { setVolume(1); showFeedback('Unmuted', 'success'); return }
+    
+    // Speed commands
+    const speedMatch = cmd.match(/speed\s*(?:to|=)?\s*([\d.]+)/)
+    if (speedMatch) { setPlaybackRate(parseFloat(speedMatch[1])); showFeedback(`Speed: ${speedMatch[1]}x`, 'success'); return }
+    if (cmd.includes('faster') || cmd.includes('speed up')) { setPlaybackRate(Math.min(4, playbackRate + 0.25)); showFeedback(`Speed: ${playbackRate + 0.25}x`, 'success'); return }
+    if (cmd.includes('slower') || cmd.includes('slow down')) { setPlaybackRate(Math.max(0.25, playbackRate - 0.25)); showFeedback(`Speed: ${playbackRate - 0.25}x`, 'success'); return }
+    
+    // Seek commands
+    const seekMatch = cmd.match(/(?:go|seek|jump)\s*(?:to)?\s*(\d+)\s*(?:seconds?)?/)
+    if (seekMatch) { setCurrentTime(parseInt(seekMatch[1])); showFeedback(`Jumped to ${seekMatch[1]}s`, 'success'); return }
+    if (cmd.includes('beginning') || cmd.includes('start')) { setCurrentTime(0); showFeedback('Start of video', 'success'); return }
+    if (cmd.includes('end')) { setCurrentTime(videoDuration); showFeedback('End of video', 'success'); return }
+    if (cmd.includes('forward') || cmd.includes('skip')) { setCurrentTime(Math.min(videoDuration, currentTime + 5)); showFeedback('+5 seconds', 'success'); return }
+    if (cmd.includes('back') || cmd.includes('rewind')) { setCurrentTime(Math.max(0, currentTime - 5)); showFeedback('-5 seconds', 'success'); return }
+    
+    // AI commands (require backend)
+    if (!jobId) { showFeedback('Upload a video first', 'error'); return }
+    
+    if (cmd.includes('remove silence') || cmd.includes('cut silence')) {
+      showFeedback('Removing silence...', 'info')
+      setProcessing(true, 'Removing silence...')
+      try {
+        await removeSilence(jobId)
+        await pollJobStatus(jobId, (p, s) => { setProcessingProgress(p); setProcessing(true, `Removing silence: ${s} (${p}%)`) })
+        setVideoUrl(getProcessedStreamUrl(jobId))
+        showFeedback('Silence removed!', 'success')
+      } catch { showFeedback('Failed to remove silence', 'error') }
+      finally { setProcessing(false) }
+      return
+    }
+    
+    if (cmd.includes('stabilize') || cmd.includes('steady')) {
+      showFeedback('Stabilizing...', 'info')
+      setProcessing(true, 'Stabilizing video...')
+      try {
+        await stabilizeVideo(jobId)
+        await pollJobStatus(jobId, (p, s) => { setProcessingProgress(p); setProcessing(true, `Stabilizing: ${s} (${p}%)`) })
+        setVideoUrl(getProcessedStreamUrl(jobId))
+        showFeedback('Video stabilized!', 'success')
+      } catch { showFeedback('Failed to stabilize', 'error') }
+      finally { setProcessing(false) }
+      return
+    }
+    
+    if (cmd.includes('denoise') || cmd.includes('remove noise')) {
+      showFeedback('Removing noise...', 'info')
+      setProcessing(true, 'Denoising audio...')
+      try {
+        await denoiseAudio(jobId)
+        await pollJobStatus(jobId, (p, s) => { setProcessingProgress(p); setProcessing(true, `Denoising: ${s} (${p}%)`) })
+        setVideoUrl(getProcessedStreamUrl(jobId))
+        showFeedback('Audio denoised!', 'success')
+      } catch { showFeedback('Failed to denoise', 'error') }
+      finally { setProcessing(false) }
+      return
+    }
+    
+    if (cmd.includes('caption') || cmd.includes('subtitle')) {
+      showFeedback('Generating captions...', 'info')
+      setProcessing(true, 'Generating captions...')
+      try {
+        await generateCaptions(jobId)
+        await pollJobStatus(jobId, (p, s) => { setProcessingProgress(p); setProcessing(true, `Captions: ${s} (${p}%)`) })
+        showFeedback('Captions generated!', 'success')
+      } catch { showFeedback('Failed to generate captions', 'error') }
+      finally { setProcessing(false) }
+      return
+    }
+    
+    if (cmd.includes('enhance') || cmd.includes('auto enhance')) {
+      showFeedback('Auto enhancing...', 'info')
+      setProcessing(true, 'Auto enhancing...')
+      try {
+        await autoEnhance(jobId)
+        await pollJobStatus(jobId, (p, s) => { setProcessingProgress(p); setProcessing(true, `Enhancing: ${s} (${p}%)`) })
+        setVideoUrl(getProcessedStreamUrl(jobId))
+        showFeedback('Video enhanced!', 'success')
+      } catch { showFeedback('Failed to enhance', 'error') }
+      finally { setProcessing(false) }
+      return
+    }
+    
+    if (cmd.includes('color correct') || cmd.includes('fix colors')) {
+      showFeedback('Color correcting...', 'info')
+      setProcessing(true, 'Color correcting...')
+      try {
+        await colorCorrect(jobId)
+        await pollJobStatus(jobId, (p, s) => { setProcessingProgress(p); setProcessing(true, `Color: ${s} (${p}%)`) })
+        setVideoUrl(getProcessedStreamUrl(jobId))
+        showFeedback('Colors corrected!', 'success')
+      } catch { showFeedback('Failed to color correct', 'error') }
+      finally { setProcessing(false) }
+      return
+    }
+    
+    showFeedback('Command not recognized', 'error')
+  }
+
+  const toggleListening = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      showFeedback('Speech recognition not supported', 'error')
+      return
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop()
+      setIsListening(false)
+      return
+    }
+
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
+    const recognition = new SpeechRecognition()
+    recognitionRef.current = recognition
+    
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = ''
+      let interimTranscript = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i]
+        if (result.isFinal) finalTranscript += result[0].transcript
+        else interimTranscript += result[0].transcript
+      }
+      setTranscript(interimTranscript || finalTranscript)
+      if (finalTranscript) executeCommand(finalTranscript)
+    }
+
+    recognition.onend = () => setIsListening(false)
+    recognition.onerror = () => { setIsListening(false); showFeedback('Speech recognition error', 'error') }
+    
+    recognition.start()
+    setIsListening(true)
+    showFeedback('Listening...', 'info')
+  }
+
+  return (
+    <div className="fixed bottom-52 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2">
+      {feedback && (
+        <div className={`px-4 py-2 rounded-full text-sm font-medium ${
+          feedback.type === 'success' ? 'bg-green-500/20 text-green-400' :
+          feedback.type === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-blue-500/20 text-blue-400'
+        }`}>
+          {feedback.message}
+        </div>
+      )}
+      
+      {transcript && isListening && (
+        <div className="px-4 py-2 bg-zinc-800/90 backdrop-blur-sm rounded-full text-sm text-zinc-300 max-w-md truncate">
+          {transcript}
+        </div>
+      )}
+      
+      <button
+        onClick={toggleListening}
+        className={`p-4 rounded-full transition-all ${
+          isListening 
+            ? 'bg-red-500 hover:bg-red-600 ring-4 ring-red-500/30 animate-pulse' 
+            : 'bg-violet-600 hover:bg-violet-700'
+        }`}
+      >
+        {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+      </button>
+      
+      <span className="text-xs text-zinc-500">
+        {isListening ? 'Click to stop' : 'Voice commands'}
+      </span>
+    </div>
+  )
+}
+
+// ============================================
 // Main Editor
 // ============================================
 export default function VoxCutEditor() {
@@ -915,6 +1115,9 @@ export default function VoxCutEditor() {
       </div>
 
       <Timeline />
+      
+      {/* Voice Command Bar */}
+      {videoUrl && <VoiceCommandBar />}
     </div>
   )
 }
