@@ -4,32 +4,19 @@ const API_BASE = 'http://localhost:8000'
 
 export const api = axios.create({
   baseURL: API_BASE,
-  timeout: 60000, // Increased timeout for video uploads
+  timeout: 120000,
 })
 
-// Add request interceptor for logging
 api.interceptors.request.use(
-  (config) => {
-    console.log('[v0] API Request:', config.method?.toUpperCase(), config.url)
-    return config
-  },
-  (error) => {
-    console.error('[v0] API Request Error:', error)
-    return Promise.reject(error)
-  }
+  (config) => config,
+  (error) => Promise.reject(error)
 )
 
-// Add response interceptor for error handling
 api.interceptors.response.use(
-  (response) => {
-    console.log('[v0] API Response:', response.status, response.config.url)
-    return response
-  },
+  (response) => response,
   (error) => {
-    if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK') {
-      console.error('[v0] Backend not running - please start the server')
-    } else {
-      console.error('[v0] API Error:', error.response?.status, error.message)
+    if (error.code === 'ERR_NETWORK') {
+      console.error('[VoxCut] Backend not running')
     }
     return Promise.reject(error)
   }
@@ -43,7 +30,7 @@ export interface Job {
   file_size?: number
   original_file?: string
   processed_file?: string
-  results?: Record<string, unknown>
+  metadata?: Record<string, any>
   error?: string
 }
 
@@ -57,36 +44,37 @@ export interface ProcessingResult {
 export async function uploadVideo(file: File): Promise<Job> {
   const formData = new FormData()
   formData.append('file', file)
-  
   const response = await api.post('/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000,
   })
-  
   return response.data
 }
 
-// Get job status
+// URLs
+export function getStreamUrl(jobId: string): string {
+  return `${API_BASE}/stream/${jobId}`
+}
+
+export function getProcessedStreamUrl(jobId: string): string {
+  return `${API_BASE}/stream/${jobId}/processed`
+}
+
+export function getDownloadUrl(jobId: string): string {
+  return `${API_BASE}/download/${jobId}`
+}
+
+// Job status
 export async function getJobStatus(jobId: string): Promise<Job> {
   const response = await api.get(`/job/${jobId}`)
   return response.data
 }
 
-// Stream video URL
-export function getStreamUrl(jobId: string): string {
-  return `${API_BASE}/stream/${jobId}`
+export async function deleteJob(jobId: string): Promise<void> {
+  await api.delete(`/job/${jobId}`)
 }
 
-// Stream processed video URL
-export function getProcessedStreamUrl(jobId: string): string {
-  return `${API_BASE}/stream/${jobId}/processed`
-}
-
-// Download video URL
-export function getDownloadUrl(jobId: string): string {
-  return `${API_BASE}/download/${jobId}`
-}
-
-// AI Processing endpoints
+// AI Processing
 export async function removeSilence(jobId: string): Promise<ProcessingResult> {
   const response = await api.post(`/process/remove-silence/${jobId}`)
   return response.data
@@ -117,33 +105,106 @@ export async function colorCorrect(jobId: string): Promise<ProcessingResult> {
   return response.data
 }
 
-export async function autoEnhance(
-  jobId: string, 
-  options: {
-    remove_silence?: boolean
-    stabilize?: boolean
-    denoise?: boolean
-    auto_captions?: boolean
-    color_correct?: boolean
-  }
-): Promise<ProcessingResult> {
+export async function autoClip(jobId: string): Promise<ProcessingResult> {
+  const response = await api.post(`/process/auto-clip/${jobId}`)
+  return response.data
+}
+
+export async function extractHighlights(jobId: string): Promise<ProcessingResult> {
+  const response = await api.post(`/process/highlights/${jobId}`)
+  return response.data
+}
+
+export async function autoEnhance(jobId: string, options: {
+  remove_silence?: boolean
+  stabilize?: boolean
+  denoise?: boolean
+  color_correct?: boolean
+} = {}): Promise<ProcessingResult> {
   const response = await api.post(`/process/auto-enhance/${jobId}`, options)
   return response.data
 }
 
-// Execute voice/text command
-export async function executeCommand(
-  jobId: string, 
-  command: string, 
-  params: Record<string, unknown> = {}
-): Promise<{ status: string; action: string; [key: string]: unknown }> {
-  const response = await api.post(`/job/${jobId}/command`, { command, params })
+// Video Editing
+export async function cutVideo(jobId: string, startTime: number, endTime: number): Promise<ProcessingResult> {
+  const response = await api.post(`/edit/cut/${jobId}`, { start_time: startTime, end_time: endTime })
   return response.data
 }
 
-// Delete job
-export async function deleteJob(jobId: string): Promise<void> {
-  await api.delete(`/job/${jobId}`)
+export async function changeSpeed(jobId: string, speed: number): Promise<ProcessingResult> {
+  const response = await api.post(`/edit/speed/${jobId}`, { speed })
+  return response.data
+}
+
+export async function addTextOverlay(jobId: string, params: {
+  text: string
+  start_time: number
+  end_time: number
+  position?: string
+  font_size?: number
+  color?: string
+}): Promise<ProcessingResult> {
+  const response = await api.post(`/edit/text/${jobId}`, params)
+  return response.data
+}
+
+export async function applyEffect(jobId: string, effectType: string, params: Record<string, any> = {}): Promise<ProcessingResult> {
+  const response = await api.post(`/edit/effect/${jobId}`, { effect_type: effectType, params })
+  return response.data
+}
+
+export async function applyTransition(jobId: string, transitionType: string, duration: number = 1.0): Promise<ProcessingResult> {
+  const response = await api.post(`/edit/transition/${jobId}`, { transition_type: transitionType, duration })
+  return response.data
+}
+
+// Captions
+export interface Caption {
+  id: number
+  start: number
+  end: number
+  text: string
+}
+
+export async function getCaptions(jobId: string): Promise<{ captions: Caption[] }> {
+  const response = await api.get(`/captions/${jobId}`)
+  return response.data
+}
+
+export async function saveCaptions(jobId: string, captions: Caption[]): Promise<{ status: string }> {
+  const response = await api.post(`/captions/${jobId}`, { captions })
+  return response.data
+}
+
+export async function burnCaptions(jobId: string): Promise<ProcessingResult> {
+  const response = await api.post(`/captions/${jobId}/burn`)
+  return response.data
+}
+
+// Clips
+export interface Clip {
+  id: string
+  path: string
+  start_time?: number
+  end_time?: number
+  duration?: number
+  score?: number
+}
+
+export async function getClips(jobId: string): Promise<{ clips: Clip[] }> {
+  const response = await api.get(`/clips/${jobId}`)
+  return response.data
+}
+
+// Voice commands
+export async function executeCommand(jobId: string, command: string, params: Record<string, any> = {}): Promise<{
+  status: string
+  command: string
+  job_id: string
+  action?: string
+}> {
+  const response = await api.post(`/job/${jobId}/command`, { command, params })
+  return response.data
 }
 
 // Health check
@@ -152,7 +213,6 @@ export async function healthCheck(): Promise<{ status: string; version: string }
   return response.data
 }
 
-// Check if backend is available
 export async function isBackendAvailable(): Promise<boolean> {
   try {
     await api.get('/health', { timeout: 3000 })
@@ -162,11 +222,49 @@ export async function isBackendAvailable(): Promise<boolean> {
   }
 }
 
-// Poll job status until complete
+// WebSocket for real-time updates
+export function createJobWebSocket(
+  jobId: string,
+  onProgress: (progress: number, message: string) => void,
+  onComplete: (result: any) => void,
+  onError: (error: string) => void
+): WebSocket {
+  const ws = new WebSocket(`ws://localhost:8000/ws/${jobId}`)
+  
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.type === 'progress') {
+        onProgress(data.progress || 0, data.message || '')
+      } else if (data.type === 'complete') {
+        onComplete(data)
+      } else if (data.type === 'error') {
+        onError(data.error || 'Unknown error')
+      } else if (data.type === 'status' && data.data) {
+        const status = data.data
+        if (status.status === 'completed') {
+          onComplete(status)
+        } else if (status.status === 'failed') {
+          onError(status.error || 'Processing failed')
+        } else {
+          onProgress(status.progress || 0, status.status || '')
+        }
+      }
+    } catch (e) {
+      console.error('WebSocket parse error:', e)
+    }
+  }
+  
+  ws.onerror = () => onError('WebSocket connection error')
+  
+  return ws
+}
+
+// Polling helper
 export async function pollJobStatus(
-  jobId: string, 
+  jobId: string,
   onProgress: (progress: number, status: string) => void,
-  interval = 1000
+  interval = 500
 ): Promise<Job> {
   return new Promise((resolve, reject) => {
     const poll = async () => {

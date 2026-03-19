@@ -12,6 +12,7 @@ from enum import Enum
 
 class JobStatus(str, Enum):
     UPLOADING = "uploading"
+    READY = "ready"
     QUEUED = "queued"
     ANALYZING = "analyzing"
     PROCESSING = "processing"

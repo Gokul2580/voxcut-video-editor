@@ -173,7 +173,7 @@ export function AIEnhancePanel() {
       }
       
       // Store results
-      setResults(prev => ({ ...prev, [tool.id]: job.results }))
+      setResults(prev => ({ ...prev, [tool.id]: job.metadata }))
       setTaskStatus(prev => ({ ...prev, [tool.id]: 'done' }))
 
     } catch (error) {

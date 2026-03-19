@@ -144,19 +144,32 @@ export function CaptionsEditor() {
 
     try {
       await api.generateCaptions(jobId)
-      const result = await api.pollJobStatus(jobId, (progress) => {
+      const result = await api.pollJobStatus(jobId, (progress, status) => {
         setProcessingProgress(progress)
       })
 
-      // Parse captions from result
-      if (result.results?.captions) {
-        const newCaptions = (result.results.captions as any[]).map((c, i) => ({
+      // Parse captions from result - check metadata
+      const metadata = result.metadata as any
+      if (metadata?.captions) {
+        const newCaptions = (metadata.captions as any[]).map((c, i) => ({
           id: `caption-${i}`,
           startTime: c.start,
           endTime: c.end,
           text: c.text
         }))
         setCaptions(newCaptions)
+      } else {
+        // Try to fetch captions from API
+        const captionsResult = await api.getCaptions(jobId)
+        if (captionsResult.captions && captionsResult.captions.length > 0) {
+          const newCaptions = captionsResult.captions.map((c, i) => ({
+            id: `caption-${i}`,
+            startTime: c.start,
+            endTime: c.end,
+            text: c.text
+          }))
+          setCaptions(newCaptions)
+        }
       }
     } catch (error) {
       console.error('Failed to generate captions:', error)

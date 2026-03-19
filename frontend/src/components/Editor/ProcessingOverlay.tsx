@@ -1,8 +1,13 @@
 import { useEditorStore } from '../../store/editorStore'
-import { Loader2, Sparkles } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 
-export function ProcessingOverlay() {
+interface ProcessingOverlayProps {
+  message?: string
+}
+
+export function ProcessingOverlay({ message }: ProcessingOverlayProps) {
   const { processingMessage, processingProgress } = useEditorStore()
+  const displayMessage = message || processingMessage
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -18,7 +23,7 @@ export function ProcessingOverlay() {
 
         {/* Message */}
         <h3 className="text-xl font-semibold text-center mb-2">
-          {processingMessage || 'Processing...'}
+          {displayMessage || 'Processing...'}
         </h3>
         <p className="text-sm text-zinc-500 text-center mb-6">
           Please wait while we process your video

@@ -21,7 +21,8 @@ import {
   Layers,
   Move,
   ArrowRight,
-  Play
+  Play,
+  X
 } from 'lucide-react'
 
 interface FilterPreset {
@@ -582,6 +583,3 @@ export function EffectsPanel() {
     </div>
   )
 }
-
-// Import X icon at the top
-import { X } from 'lucide-react'
