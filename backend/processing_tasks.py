@@ -9,9 +9,16 @@ from typing import Tuple, List, Dict, Optional
 from video_processor import VideoProcessor, AudioAnalyzer
 from job_manager import job_manager, JobStatus
 import json
-import whisper
 import numpy as np
 import cv2
+import os
+
+# Optional: Use OpenAI API for speech detection (more Windows-compatible)
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 
 async def process_video_async(job_id: str, video_path: str) -> bool:
@@ -97,28 +104,40 @@ async def process_video_async(job_id: str, video_path: str) -> bool:
 
 async def detect_speech_whisper(audio_path: str) -> List[Tuple[float, float]]:
     """
-    Detect speech segments using Whisper
+    Detect speech segments using OpenAI Whisper API
     Returns list of (start_time, end_time) tuples
+    Falls back to basic detection if API is unavailable
     """
-    try:
-        # Load Whisper model (base model for speed)
-        model = whisper.load_model("base")
-        
-        # Transcribe audio
-        result = model.transcribe(audio_path, language="en")
-        
-        # Extract speech segments from result
-        speech_segments = []
-        for segment in result.get("segments", []):
-            start = segment["start"]
-            end = segment["end"]
-            speech_segments.append((start, end))
-        
-        return speech_segments
+    # Try OpenAI API first (more Windows-compatible)
+    if OPENAI_AVAILABLE:
+        try:
+            api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                client = OpenAI(api_key=api_key)
+                
+                with open(audio_path, "rb") as audio_file:
+                    result = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        response_format="verbose_json",
+                        timestamp_granularities=["segment"]
+                    )
+                
+                # Extract speech segments from result
+                speech_segments = []
+                if hasattr(result, 'segments') and result.segments:
+                    for segment in result.segments:
+                        start = segment.get("start", segment.start if hasattr(segment, 'start') else 0)
+                        end = segment.get("end", segment.end if hasattr(segment, 'end') else 0)
+                        speech_segments.append((start, end))
+                
+                return speech_segments
+        except Exception as e:
+            print(f"OpenAI Whisper API failed: {e}")
     
-    except Exception as e:
-        print(f"Whisper transcription failed: {e}")
-        return []
+    # Fallback: Return empty list (skip speech detection)
+    print("Speech detection unavailable - skipping")
+    return []
 
 
 def detect_best_take(processor: VideoProcessor, scene_changes: List[int]) -> Dict:
