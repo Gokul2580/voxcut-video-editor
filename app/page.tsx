@@ -191,15 +191,6 @@ async function saveCaptions(jobId: string, captions: any[]) {
   return (await api.post(`/captions/${jobId}`, { captions })).data
 }
 
-async function getCaptions(jobId: string) {
-  try {
-    const response = await api.get(`/captions/${jobId}`)
-    return response.data
-  } catch {
-    return { captions: [] }
-  }
-}
-
 // ============================================
 // Editor Store
 // ============================================
