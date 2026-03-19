@@ -266,10 +266,22 @@ export function AIEnhancePanel() {
         ))}
       </div>
 
-      {/* No Video Warning */}
-      {!jobId && (
+      {/* Status Messages */}
+      {!videoFile && !jobId && (
         <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-yellow-400 text-sm">
           Upload a video to use AI tools
+        </div>
+      )}
+
+      {videoFile && !jobId && (
+        <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 text-sm">
+          <p className="font-medium">Backend not connected</p>
+          <p className="text-xs mt-1 text-orange-300/70">
+            Start the backend server to enable AI features:
+          </p>
+          <code className="text-xs block mt-2 bg-black/30 p-2 rounded font-mono">
+            cd backend && python -m uvicorn main:app --reload --port 8000
+          </code>
         </div>
       )}
 

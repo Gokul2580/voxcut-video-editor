@@ -50,6 +50,7 @@ export function VideoPreview() {
     }
 
     const handleLoadedMetadata = () => {
+      console.log('[v0] Video loaded, duration:', video.duration)
       setVideoDuration(video.duration)
       setIsVideoLoaded(true)
       setVideoError(null)
@@ -65,8 +66,15 @@ export function VideoPreview() {
     }
 
     const handleError = (e: Event) => {
-      console.error('Video error:', e)
-      setVideoError('Failed to load video. Please try again.')
+      const videoEl = e.target as HTMLVideoElement
+      console.error('[v0] Video error:', videoEl.error?.message || e)
+      // Only show error if we're not trying to load
+      if (videoEl.src && !videoEl.src.includes('blob:')) {
+        // Backend stream failed, might need to fallback
+        setVideoError('Failed to load video from server. Try re-uploading.')
+      } else {
+        setVideoError('Failed to load video. Please try again.')
+      }
       setIsVideoLoaded(false)
     }
 
@@ -122,6 +130,7 @@ export function VideoPreview() {
 
   // Reset video loaded state when URL changes
   useEffect(() => {
+    console.log('[v0] Video URL changed:', videoUrl?.substring(0, 50) + '...')
     setIsVideoLoaded(false)
     setVideoError(null)
   }, [videoUrl])

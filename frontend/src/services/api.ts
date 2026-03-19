@@ -4,8 +4,36 @@ const API_BASE = 'http://localhost:8000'
 
 export const api = axios.create({
   baseURL: API_BASE,
-  timeout: 30000,
+  timeout: 60000, // Increased timeout for video uploads
 })
+
+// Add request interceptor for logging
+api.interceptors.request.use(
+  (config) => {
+    console.log('[v0] API Request:', config.method?.toUpperCase(), config.url)
+    return config
+  },
+  (error) => {
+    console.error('[v0] API Request Error:', error)
+    return Promise.reject(error)
+  }
+)
+
+// Add response interceptor for error handling
+api.interceptors.response.use(
+  (response) => {
+    console.log('[v0] API Response:', response.status, response.config.url)
+    return response
+  },
+  (error) => {
+    if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK') {
+      console.error('[v0] Backend not running - please start the server')
+    } else {
+      console.error('[v0] API Error:', error.response?.status, error.message)
+    }
+    return Promise.reject(error)
+  }
+)
 
 export interface Job {
   job_id: string
@@ -122,6 +150,16 @@ export async function deleteJob(jobId: string): Promise<void> {
 export async function healthCheck(): Promise<{ status: string; version: string }> {
   const response = await api.get('/health')
   return response.data
+}
+
+// Check if backend is available
+export async function isBackendAvailable(): Promise<boolean> {
+  try {
+    await api.get('/health', { timeout: 3000 })
+    return true
+  } catch {
+    return false
+  }
 }
 
 // Poll job status until complete

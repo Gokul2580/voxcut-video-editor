@@ -43,43 +43,51 @@ export function EditorPage() {
 
   const handleFileSelect = async (file: File) => {
     if (file && file.type.startsWith('video/')) {
+      console.log('[v0] Starting file upload:', file.name)
       setVideoFile(file)
       setIsUploading(true)
       setUploadProgress(0)
       
+      // Create local URL for immediate preview
+      const localUrl = URL.createObjectURL(file)
+      console.log('[v0] Created local URL:', localUrl)
+      setVideoUrl(localUrl)
+      
+      // Get video duration
+      const video = document.createElement('video')
+      video.src = localUrl
+      video.onloadedmetadata = () => {
+        console.log('[v0] Video duration:', video.duration)
+        setVideoDuration(video.duration)
+        addVideoClip({
+          id: `clip-${Date.now()}`,
+          name: file.name,
+          src: localUrl,
+          duration: video.duration,
+          startTime: 0,
+          endTime: video.duration,
+          trackIndex: 0
+        })
+      }
+      
+      // Try to upload to backend (optional - video works without it)
       try {
-        // Create local URL for immediate preview
-        const localUrl = URL.createObjectURL(file)
-        setVideoUrl(localUrl)
-        
-        // Get video duration
-        const video = document.createElement('video')
-        video.src = localUrl
-        video.onloadedmetadata = () => {
-          setVideoDuration(video.duration)
-          addVideoClip({
-            id: `clip-${Date.now()}`,
-            name: file.name,
-            src: localUrl,
-            duration: video.duration,
-            startTime: 0,
-            endTime: video.duration,
-            trackIndex: 0
-          })
-        }
-        
-        // Upload to backend
+        console.log('[v0] Uploading to backend...')
         const job = await uploadVideo(file)
+        console.log('[v0] Upload successful, job_id:', job.job_id)
         setJobId(job.job_id)
         
-        // Switch to streamed URL from backend
+        // Switch to streamed URL from backend for better seeking
         const streamUrl = getStreamUrl(job.job_id)
+        console.log('[v0] Stream URL:', streamUrl)
         setVideoUrl(streamUrl)
         
         setUploadProgress(100)
       } catch (error) {
-        console.error('Upload failed:', error)
-        // Keep using local URL if upload fails
+        console.error('[v0] Backend upload failed:', error)
+        // Keep using local URL - video still works without backend
+        // AI features will be disabled
+        setUploadProgress(100)
       } finally {
         setIsUploading(false)
       }
@@ -133,6 +141,11 @@ export function EditorPage() {
           {jobId && (
             <span className="text-xs text-green-400 bg-green-400/10 px-2 py-0.5 rounded">
               Connected
+            </span>
+          )}
+          {videoUrl && !jobId && (
+            <span className="text-xs text-orange-400 bg-orange-400/10 px-2 py-0.5 rounded">
+              Local Only
             </span>
           )}
         </div>
@@ -208,7 +221,7 @@ export function EditorPage() {
 
         {/* Main Preview Area */}
         <main className="flex-1 flex flex-col min-w-0">
-          {!videoUrl ? (
+          {!videoUrl || videoUrl === '' ? (
             <div 
               className={`flex-1 flex items-center justify-center ${
                 isDragging ? 'bg-violet-600/10' : ''
