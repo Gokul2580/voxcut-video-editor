@@ -191,6 +191,15 @@ async function saveCaptions(jobId: string, captions: any[]) {
   return (await api.post(`/captions/${jobId}`, { captions })).data
 }
 
+async function getCaptions(jobId: string) {
+  try {
+    const response = await api.get(`/captions/${jobId}`)
+    return response.data
+  } catch {
+    return { captions: [] }
+  }
+}
+
 // ============================================
 // Editor Store
 // ============================================
@@ -240,11 +249,13 @@ interface EditorState {
   effects: Effect[]
   zoom: number
   selectedClipId: string | null
-  activePanel: 'tools' | 'effects' | 'text' | 'audio' | 'captions' | 'ai'
+  activePanel: 'tools' | 'effects' | 'ai' | 'captions' | 'voiceover'
   isProcessing: boolean
   processingProgress: number
   processingMessage: string
   isListening: boolean
+  showWelcome: boolean
+  captions: { id: number; start: number; end: number; text: string }[]
   
   setVideoFile: (file: File | null) => void
   setVideoUrl: (url: string | null) => void
@@ -267,6 +278,11 @@ interface EditorState {
   setProcessing: (isProcessing: boolean, message?: string) => void
   setProcessingProgress: (progress: number) => void
   setIsListening: (listening: boolean) => void
+  setShowWelcome: (show: boolean) => void
+  setCaptions: (captions: EditorState['captions']) => void
+  addCaption: (caption: EditorState['captions'][0]) => void
+  updateCaption: (id: number, updates: Partial<EditorState['captions'][0]>) => void
+  removeCaption: (id: number) => void
 }
 
 const useEditorStore = create<EditorState>((set) => ({
@@ -288,6 +304,8 @@ const useEditorStore = create<EditorState>((set) => ({
   processingProgress: 0,
   processingMessage: '',
   isListening: false,
+  showWelcome: true,
+  captions: [],
   
   setVideoFile: (file) => set({ videoFile: file }),
   setVideoUrl: (url) => set({ videoUrl: url }),
@@ -312,7 +330,84 @@ const useEditorStore = create<EditorState>((set) => ({
   setProcessing: (isProcessing, message = '') => set({ isProcessing, processingMessage: message, processingProgress: isProcessing ? 0 : 100 }),
   setProcessingProgress: (progress) => set({ processingProgress: progress }),
   setIsListening: (listening) => set({ isListening: listening }),
+  setShowWelcome: (show) => set({ showWelcome: show }),
+  setCaptions: (captions) => set({ captions }),
+  addCaption: (caption) => set((s) => ({ captions: [...s.captions, caption] })),
+  updateCaption: (id, updates) => set((s) => ({
+    captions: s.captions.map((c) => c.id === id ? { ...c, ...updates } : c)
+  })),
+  removeCaption: (id) => set((s) => ({ captions: s.captions.filter((c) => c.id !== id) })),
 }))
+
+// ============================================
+// Welcome Dialog
+// ============================================
+function WelcomeDialog() {
+  const { showWelcome, setShowWelcome } = useEditorStore()
+  
+  if (!showWelcome) return null
+  
+  return (
+    <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      <div className="bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-800 rounded-3xl max-w-2xl w-full border border-zinc-700/50 shadow-2xl overflow-hidden">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-r from-violet-600/20 via-purple-600/20 to-pink-600/20" />
+          <div className="relative p-8 pb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-violet-600 rounded-2xl">
+                <Film className="w-8 h-8" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">VoxCut</h1>
+                <p className="text-sm text-violet-400">AI Video Editor for Everyone</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="px-8 pb-8">
+          <div className="space-y-4 text-zinc-300 leading-relaxed">
+            <p className="text-lg">
+              <span className="text-white font-semibold">Not everyone starts with the best resources.</span>
+            </p>
+            <p>
+              There are thousands of creators from middle-class backgrounds who have powerful ideas, strong creativity, and real stories to tell.
+            </p>
+            <p>
+              But they are often held back — not by lack of talent, but by <span className="text-violet-400 font-medium">lack of access to expensive devices and editing tools</span>.
+            </p>
+            <p className="text-lg font-semibold text-white">
+              VoxCut is built for them.
+            </p>
+            <p>
+              It turns raw, unedited videos into high-quality content without requiring technical skills or costly software.
+            </p>
+            <div className="pt-2 border-t border-zinc-700/50">
+              <p className="text-violet-400 font-medium text-lg">
+                Because creativity should never depend on money. It should depend on you.
+              </p>
+            </div>
+          </div>
+          
+          <div className="mt-8 flex flex-col gap-4">
+            <button
+              onClick={() => setShowWelcome(false)}
+              className="w-full py-4 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-xl font-semibold text-lg transition-all shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40"
+            >
+              Start Creating
+            </button>
+            <div className="flex items-center justify-center gap-6 text-xs text-zinc-500">
+              <span className="flex items-center gap-1"><Wand2 className="w-3 h-3" /> AI-Powered</span>
+              <span className="flex items-center gap-1"><Mic className="w-3 h-3" /> Voice Control</span>
+              <span className="flex items-center gap-1"><Subtitles className="w-3 h-3" /> Auto Captions</span>
+              <span className="flex items-center gap-1"><Sparkles className="w-3 h-3" /> One-Click Enhance</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ============================================
 // Processing Overlay
@@ -729,11 +824,11 @@ function VoiceoverPanel() {
 // Captions Panel
 // ============================================
 function CaptionsPanel() {
-  const { jobId, currentTime, setProcessing, setProcessingProgress, setVideoUrl } = useEditorStore()
-  const [captions, setCaptions] = useState<{ id: number; start: number; end: number; text: string }[]>([])
+  const { jobId, currentTime, setProcessing, setProcessingProgress, setVideoUrl, captions, setCaptions, updateCaption } = useEditorStore()
   const [isGenerating, setIsGenerating] = useState(false)
   const [selectedStyle, setSelectedStyle] = useState('default')
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [isBurning, setIsBurning] = useState(false)
 
   const styles = [
     { id: 'default', name: 'Default', description: 'White with black outline' },
@@ -743,17 +838,17 @@ function CaptionsPanel() {
     { id: 'minimal', name: 'Minimal', description: 'Simple white text' },
   ]
 
-  const loadCaptions = async () => {
+  const loadCaptions = useCallback(async () => {
     if (!jobId) return
     try {
       const data = await getCaptions(jobId)
       if (data.captions) setCaptions(data.captions)
     } catch {}
-  }
+  }, [jobId, setCaptions])
 
   useEffect(() => {
     loadCaptions()
-  }, [jobId])
+  }, [loadCaptions])
 
   const handleGenerate = async () => {
     if (!jobId) return
@@ -779,6 +874,7 @@ function CaptionsPanel() {
 
   const handleBurn = async () => {
     if (!jobId || captions.length === 0) return
+    setIsBurning(true)
     setProcessing(true, 'Burning subtitles...')
     
     try {
@@ -791,17 +887,22 @@ function CaptionsPanel() {
     } catch (e) {
       console.error('Burn subtitles failed:', e)
     } finally {
+      setIsBurning(false)
       setProcessing(false)
     }
   }
 
   const handleSave = async () => {
     if (!jobId) return
-    await saveCaptions(jobId, captions)
+    try {
+      await saveCaptions(jobId, captions)
+    } catch (e) {
+      console.error('Save captions failed:', e)
+    }
   }
 
-  const updateCaption = (id: number, field: string, value: string | number) => {
-    setCaptions(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
+  const handleUpdateCaption = (id: number, field: string, value: string | number) => {
+    updateCaption(id, { [field]: value })
   }
 
   const formatTime = (seconds: number) => {
@@ -879,7 +980,7 @@ function CaptionsPanel() {
                       <input
                         type="text"
                         value={caption.text}
-                        onChange={(e) => updateCaption(caption.id, 'text', e.target.value)}
+                        onChange={(e) => handleUpdateCaption(caption.id, 'text', e.target.value)}
                         onClick={(e) => e.stopPropagation()}
                         className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-sm"
                         autoFocus
@@ -893,10 +994,11 @@ function CaptionsPanel() {
 
               <button
                 onClick={handleBurn}
-                className="w-full p-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 rounded-xl flex items-center justify-center gap-2"
+                disabled={isBurning}
+                className="w-full p-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                <Type className="w-5 h-5" />
-                Burn Subtitles into Video
+                {isBurning ? <Loader2 className="w-5 h-5 animate-spin" /> : <Type className="w-5 h-5" />}
+                {isBurning ? 'Burning...' : 'Burn Subtitles into Video'}
               </button>
             </>
           )}
@@ -1312,11 +1414,12 @@ function VoiceCommandBar() {
 // Main Editor
 // ============================================
 export default function VoxCutEditor() {
-  const { videoUrl, setVideoFile, setVideoUrl, setJobId, jobId, activePanel, setActivePanel, isProcessing, addVideoClip, setVideoDuration } = useEditorStore()
+  const { videoUrl, setVideoFile, setVideoUrl, setJobId, jobId, activePanel, setActivePanel, isProcessing, addVideoClip, setVideoDuration, showWelcome, setShowWelcome } = useEditorStore()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
+  const [showHelp, setShowHelp] = useState(false)
 
   useEffect(() => {
     isBackendAvailable().then(available => setBackendStatus(available ? 'connected' : 'disconnected'))
@@ -1326,6 +1429,7 @@ export default function VoxCutEditor() {
     if (!file || !file.type.startsWith('video/')) return
     setVideoFile(file)
     setIsUploading(true)
+    setShowWelcome(false)
     
     const localUrl = URL.createObjectURL(file)
     setVideoUrl(localUrl)
@@ -1359,31 +1463,64 @@ export default function VoxCutEditor() {
     { id: 'tools' as const, icon: Layers, label: 'Edit' },
     { id: 'effects' as const, icon: Sparkles, label: 'Effects' },
     { id: 'ai' as const, icon: Wand2, label: 'AI' },
+    { id: 'captions' as const, icon: Subtitles, label: 'Captions' },
+    { id: 'voiceover' as const, icon: Mic, label: 'Voice' },
   ]
 
   return (
     <div className="h-screen w-screen bg-zinc-950 text-white flex flex-col overflow-hidden">
+      <WelcomeDialog />
       {isProcessing && <ProcessingOverlay />}
+      
+      {/* Help Modal */}
+      {showHelp && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
+          <div className="bg-zinc-900 rounded-2xl max-w-lg w-full border border-zinc-800 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Voice Commands</h2>
+              <button onClick={() => setShowHelp(false)} className="p-2 hover:bg-zinc-800 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-zinc-800 p-3 rounded-lg"><span className="text-violet-400">"play"</span> - Play video</div>
+                <div className="bg-zinc-800 p-3 rounded-lg"><span className="text-violet-400">"pause"</span> - Pause video</div>
+                <div className="bg-zinc-800 p-3 rounded-lg"><span className="text-violet-400">"remove silence"</span> - Cut silent parts</div>
+                <div className="bg-zinc-800 p-3 rounded-lg"><span className="text-violet-400">"stabilize"</span> - Fix shaky video</div>
+                <div className="bg-zinc-800 p-3 rounded-lg"><span className="text-violet-400">"denoise"</span> - Clean audio</div>
+                <div className="bg-zinc-800 p-3 rounded-lg"><span className="text-violet-400">"captions"</span> - Generate subtitles</div>
+                <div className="bg-zinc-800 p-3 rounded-lg"><span className="text-violet-400">"enhance"</span> - Auto-improve all</div>
+                <div className="bg-zinc-800 p-3 rounded-lg"><span className="text-violet-400">"color correct"</span> - Fix colors</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       <header className="h-14 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Film className="w-6 h-6 text-violet-500" />
+          <button onClick={() => setShowWelcome(true)} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+            <div className="p-1.5 bg-violet-600 rounded-lg">
+              <Film className="w-5 h-5" />
+            </div>
             <span className="font-bold text-lg">VoxCut</span>
-          </div>
-          <span className="text-zinc-500 text-sm">|</span>
-          <span className="text-zinc-400 text-sm">AI Video Editor</span>
-          {backendStatus === 'connected' && <span className="text-xs text-green-400 bg-green-400/10 px-2 py-0.5 rounded">Connected</span>}
-          {backendStatus === 'disconnected' && <span className="text-xs text-orange-400 bg-orange-400/10 px-2 py-0.5 rounded">Local Only</span>}
+          </button>
+          <span className="text-zinc-600">|</span>
+          <span className="text-zinc-500 text-sm">AI Video Editor</span>
+          {backendStatus === 'connected' && <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-full flex items-center gap-1"><span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />Connected</span>}
+          {backendStatus === 'disconnected' && <span className="text-xs text-orange-400 bg-orange-500/10 px-2 py-1 rounded-full">Offline</span>}
+          {backendStatus === 'checking' && <span className="text-xs text-zinc-400 bg-zinc-800 px-2 py-1 rounded-full flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />Checking...</span>}
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowHelp(true)} className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors" title="Help">
+            <HelpCircle className="w-5 h-5" />
+          </button>
           {videoUrl && jobId && (
-            <a href={getDownloadUrl(jobId)} target="_blank" className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium flex items-center gap-2">
+            <a href={getDownloadUrl(jobId)} target="_blank" className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
               <Download className="w-4 h-4" />Export
             </a>
           )}
-          <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="px-4 py-2 bg-violet-600 hover:bg-violet-700 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50">
+          <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="px-4 py-2 bg-violet-600 hover:bg-violet-700 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 transition-colors">
             {isUploading ? <><Loader2 className="w-4 h-4 animate-spin" />Uploading...</> : <><Upload className="w-4 h-4" />Import</>}
           </button>
           <input ref={fileInputRef} type="file" accept="video/*" onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])} className="hidden" />
@@ -1391,31 +1528,34 @@ export default function VoxCutEditor() {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        <aside className="w-16 bg-zinc-900 border-r border-zinc-800 flex flex-col items-center py-4 gap-2 shrink-0">
+        <aside className="w-16 bg-zinc-900 border-r border-zinc-800 flex flex-col items-center py-3 gap-1 shrink-0">
           {toolbarItems.map((item) => (
-            <button key={item.id} onClick={() => setActivePanel(item.id)} className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${activePanel === item.id ? 'bg-violet-600 text-white' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'}`}>
+            <button key={item.id} onClick={() => setActivePanel(item.id)} className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all ${activePanel === item.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'}`}>
               <item.icon className="w-5 h-5" />
-              <span className="text-[10px]">{item.label}</span>
+              <span className="text-[9px] font-medium">{item.label}</span>
             </button>
           ))}
         </aside>
 
-        <aside className="w-72 bg-zinc-900 border-r border-zinc-800 shrink-0 overflow-y-auto">
+        <aside className="w-80 bg-zinc-900/50 border-r border-zinc-800 shrink-0 overflow-y-auto">
           {activePanel === 'tools' && <ToolbarPanel />}
           {activePanel === 'effects' && <EffectsPanel />}
           {activePanel === 'ai' && <AIEnhancePanel />}
+          {activePanel === 'captions' && <CaptionsPanel />}
+          {activePanel === 'voiceover' && <VoiceoverPanel />}
         </aside>
 
-        <main className="flex-1 flex flex-col min-w-0">
+        <main className="flex-1 flex flex-col min-w-0 bg-zinc-950">
           {!videoUrl ? (
-            <div className={`flex-1 flex items-center justify-center ${isDragging ? 'bg-violet-600/10' : ''}`} onDrop={handleDrop} onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }} onDragLeave={() => setIsDragging(false)}>
-              <div className={`border-2 border-dashed rounded-2xl p-16 flex flex-col items-center gap-4 cursor-pointer ${isDragging ? 'border-violet-500 bg-violet-500/10' : 'border-zinc-700 hover:border-zinc-600'}`} onClick={() => fileInputRef.current?.click()}>
-                <div className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center">
-                  <Upload className="w-10 h-10 text-zinc-500" />
+            <div className={`flex-1 flex items-center justify-center transition-colors ${isDragging ? 'bg-violet-600/5' : ''}`} onDrop={handleDrop} onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }} onDragLeave={() => setIsDragging(false)}>
+              <div className={`border-2 border-dashed rounded-2xl p-12 flex flex-col items-center gap-6 cursor-pointer transition-all ${isDragging ? 'border-violet-500 bg-violet-500/5 scale-105' : 'border-zinc-800 hover:border-zinc-600 hover:bg-zinc-900/50'}`} onClick={() => fileInputRef.current?.click()}>
+                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-violet-600/20 to-purple-600/20 flex items-center justify-center border border-violet-500/20">
+                  <Upload className="w-12 h-12 text-violet-400" />
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-medium text-zinc-300">Drop video here or click to upload</p>
-                  <p className="text-sm text-zinc-500 mt-1">Supports MP4, MOV, AVI, WebM</p>
+                  <p className="text-xl font-medium text-zinc-200 mb-2">Drop your video here</p>
+                  <p className="text-sm text-zinc-500">or click to browse</p>
+                  <p className="text-xs text-zinc-600 mt-4">Supports MP4, MOV, AVI, WebM up to 2GB</p>
                 </div>
               </div>
             </div>
@@ -1427,7 +1567,6 @@ export default function VoxCutEditor() {
 
       <Timeline />
       
-      {/* Voice Command Bar */}
       {videoUrl && <VoiceCommandBar />}
     </div>
   )
