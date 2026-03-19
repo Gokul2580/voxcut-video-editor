@@ -7,6 +7,9 @@ import { Timeline } from '../components/Editor/Timeline'
 import { VoiceCommandBar } from '../components/Editor/VoiceCommandBar'
 import { AIEnhancePanel } from '../components/Editor/AIEnhancePanel'
 import { EffectsPanel } from '../components/Editor/EffectsPanel'
+import { TextPanel } from '../components/Editor/TextPanel'
+import { AudioPanel } from '../components/Editor/AudioPanel'
+import { CaptionsEditor } from '../components/Editor/CaptionsEditor'
 import { ProcessingOverlay } from '../components/Editor/ProcessingOverlay'
 import { uploadVideo, getStreamUrl } from '../services/api'
 import { 
@@ -18,7 +21,8 @@ import {
   Music,
   Layers,
   Download,
-  Loader2
+  Loader2,
+  Subtitles
 } from 'lucide-react'
 
 export function EditorPage() {
@@ -121,7 +125,8 @@ export function EditorPage() {
     { id: 'effects', icon: Sparkles, label: 'Effects' },
     { id: 'text', icon: Type, label: 'Text' },
     { id: 'audio', icon: Music, label: 'Audio' },
-    { id: 'ai', icon: Wand2, label: 'AI Tools' },
+    { id: 'captions', icon: Subtitles, label: 'Captions' },
+    { id: 'ai', icon: Wand2, label: 'AI' },
   ] as const
 
   return (
@@ -214,8 +219,9 @@ export function EditorPage() {
         <aside className="w-72 bg-[#0d0d14] border-r border-[#1e1e2e] shrink-0 overflow-y-auto">
           {activePanel === 'tools' && <Toolbar />}
           {activePanel === 'effects' && <EffectsPanel />}
-          {activePanel === 'text' && <Toolbar />}
-          {activePanel === 'audio' && <Toolbar />}
+          {activePanel === 'text' && <TextPanel />}
+          {activePanel === 'audio' && <AudioPanel />}
+          {activePanel === 'captions' && <CaptionsEditor />}
           {activePanel === 'ai' && <AIEnhancePanel />}
         </aside>
 

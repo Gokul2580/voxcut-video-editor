@@ -69,7 +69,7 @@ export interface EditorState {
   // UI state
   zoom: number
   selectedClipId: string | null
-  activePanel: 'tools' | 'effects' | 'text' | 'audio' | 'ai'
+  activePanel: 'tools' | 'effects' | 'text' | 'audio' | 'captions' | 'ai'
   isProcessing: boolean
   processingProgress: number
   processingMessage: string
