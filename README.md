@@ -4,6 +4,10 @@
 
 ---
 
+![VoxCut - The World's First Fully Voice-Controlled Video Editor](https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-EsOS37gCUOOMIIvoa8ooQOwESeeiCe.png)
+
+---
+
 ## The Reality We Want to Change
 
 **Not everyone starts with the best resources.**
